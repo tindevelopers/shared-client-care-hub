@@ -39,9 +39,7 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.2)
 
-  packages/domain-campaigns: {}
-
-  packages/domain-contacts:
+  packages/domain-campaigns:
     dependencies:
       '@supabase/supabase-js':
         specifier: ^2.89.0
@@ -52,6 +50,28 @@ importers:
       '@tindevelopers/core-kernel':
         specifier: ^1.0.0
         version: 1.0.0(@neondatabase/auth@0.5.0-beta(2ce496167ccb78ff61d811f15f671a6a))(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(kysely@0.29.5))(next@16.3.5(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tindevelopers/schema-crm':
+        specifier: ^1.0.0
+        version: 1.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.2
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+
+  packages/domain-contacts:
+    dependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.89.0
+        version: 2.116.0(@opentelemetry/api@1.9.0)
+      '@tindevelopers/adapter-kit':
+        specifier: 1.3.0
+        version: 1.3.0(@opentelemetry/api@1.9.0)(@tindevelopers/core-kernel@1.0.0(@neondatabase/auth@0.5.0-beta(969692751781ca6f59d54f97668849d1))(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(kysely@0.29.5))(next@16.3.5(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0))
+      '@tindevelopers/core-kernel':
+        specifier: ^1.0.0
+        version: 1.0.0(@neondatabase/auth@0.5.0-beta(969692751781ca6f59d54f97668849d1))(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(kysely@0.29.5))(next@16.3.5(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tindevelopers/schema-crm':
         specifier: ^1.0.0
         version: 1.0.0
@@ -5640,6 +5660,13 @@ snapshots:
     dependencies:
       '@supabase/supabase-js': 2.116.0(@opentelemetry/api@1.9.0)
       '@tindevelopers/core-kernel': 1.0.0(@neondatabase/auth@0.5.0-beta(2ce496167ccb78ff61d811f15f671a6a))(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(kysely@0.29.5))(next@16.3.5(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+
+  '@tindevelopers/adapter-kit@1.3.0(@opentelemetry/api@1.9.0)(@tindevelopers/core-kernel@1.0.0(@neondatabase/auth@0.5.0-beta(969692751781ca6f59d54f97668849d1))(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(kysely@0.29.5))(next@16.3.5(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0))':
+    dependencies:
+      '@supabase/supabase-js': 2.116.0(@opentelemetry/api@1.9.0)
+      '@tindevelopers/core-kernel': 1.0.0(@neondatabase/auth@0.5.0-beta(969692751781ca6f59d54f97668849d1))(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.0)(kysely@0.29.5))(next@16.3.5(@opentelemetry/api@1.9.0)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
     transitivePeerDependencies:
       - '@opentelemetry/api'
 
