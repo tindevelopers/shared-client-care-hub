@@ -11,6 +11,7 @@
     "lint": "eslint . --max-warnings=0",
     "type-check": "pnpm -r type-check",
     "depcruise": "node scripts/depcruise.mjs",
+    "lint:deps": "depcruise --config .dependency-cruiser.cjs packages",
     "test": "depcruise --config .dependency-cruiser.cjs packages && vitest run --passWithNoTests",
     "build": "pnpm -r build",
     "quality": "pnpm lint && pnpm type-check && pnpm test && pnpm build",
