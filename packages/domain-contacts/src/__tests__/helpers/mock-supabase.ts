@@ -4,9 +4,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * Minimal Supabase client mock for payload-parity tests.
  *
  * Records every query-builder call (`from`, `insert`, `update`, `delete`,
- * `select`, `eq`, `in`, `or`, `order`, `limit`, `range`, `single`,
- * `maybeSingle`) in order, so tests can assert the EXACT query shape the
- * store produces against the cataloged writer payloads (W1–W11, W17, W18).
+ * `upsert`, `select`, `eq`, `in`, `or`, `order`, `limit`, `range`, `not`,
+ * `contains`, `single`, `maybeSingle`) in order, so tests can assert the
+ * EXACT query shape the store produces against the cataloged writer payloads
+ * (W1–W11, W17, W18).
  *
  * Terminal results: pass a single object for a sticky result, or an array for
  * a one-shot queue (each `await`/`single()`/`maybeSingle()` consumes the next
@@ -42,6 +43,8 @@ const CHAIN_OPS = [
   "order",
   "limit",
   "range",
+  "not",
+  "contains",
 ] as const;
 
 export function createMockSupabase(results: MockResult | MockResult[] = {}) {

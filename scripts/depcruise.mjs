@@ -50,27 +50,38 @@ child.on("error", (error) => {
 });
 
 child.on("close", (code) => {
-  process.stdout.write(stdout);
-  process.stderr.write(stderr);
-  if (code !== 0 && code !== null) process.exit(code);
-  if (code === null) process.exit(1);
-  if (outputType(args) === "json") {
-    // pnpm may prepend engine warnings to stdout; the JSON body starts at the
-    // first line-leading "{" (same dance tests/boundary/rules-fire.test.ts does).
-    const start = stdout.search(/^\{/m);
-    if (start >= 0) {
-      try {
-        const report = JSON.parse(stdout.slice(start));
-        const hasErrors = (report.summary?.violations ?? []).some(
-          (violation) => violation?.rule?.severity === "error",
-        );
-        if (hasErrors) process.exit(1);
-      } catch (error) {
-        process.stderr.write(
-          `depcruise wrapper: could not parse json report; keeping exit 0 (${error})\n`,
-        );
+  const exitCode = (() => {
+    if (code !== 0 && code !== null) return code;
+    if (code === null) return 1;
+    if (outputType(args) === "json") {
+      // pnpm may prepend engine warnings to stdout; the JSON body starts at the
+      // first line-leading "{" (same dance tests/boundary/rules-fire.test.ts does).
+      const start = stdout.search(/^\{/m);
+      if (start >= 0) {
+        try {
+          const report = JSON.parse(stdout.slice(start));
+          const hasErrors = (report.summary?.violations ?? []).some(
+            (violation) => violation?.rule?.severity === "error",
+          );
+          if (hasErrors) return 1;
+        } catch (error) {
+          process.stderr.write(
+            `depcruise wrapper: could not parse json report; keeping exit 0 (${error})\n`,
+          );
+        }
       }
     }
-  }
-  process.exit(0);
+    return 0;
+  })();
+
+  // Drain both pipes before exiting. process.exit() truncates pending
+  // asynchronous writes, and the JSON report exceeds libuv's 64KB buffer
+  // since the suppression/crm-sync/campaigns modules moved into
+  // domain-contacts — exiting immediately cut the report mid-document and
+  // broke every rules-fire consumer of this wrapper.
+  process.stderr.write(stderr, () => {
+    process.stdout.write(stdout, () => {
+      process.exit(exitCode);
+    });
+  });
 });

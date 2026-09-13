@@ -1,7 +1,7 @@
 {
   "name": "@tindevelopers/domain-contacts",
-  "version": "0.0.0",
-  "description": "Contacts domain package — tenant-tier store owning the canonical contacts aggregate (W4–W11, W17, W18 payload parity)",
+  "version": "1.0.0",
+  "description": "Contacts domain package — owns the canonical contacts aggregate: tenant-tier store, system-tier store, suppression + crm-sync subscribers, segment materializer",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -9,6 +9,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./suppression": {
+      "types": "./dist/suppression/suppression-subscriber.d.ts",
+      "import": "./dist/suppression/suppression-subscriber.js",
+      "default": "./dist/suppression/suppression-subscriber.js"
+    },
+    "./crm-sync": {
+      "types": "./dist/crm-sync/subscriptions.d.ts",
+      "import": "./dist/crm-sync/subscriptions.js",
+      "default": "./dist/crm-sync/subscriptions.js"
     }
   },
   "files": [
@@ -21,7 +31,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
-    "@tindevelopers/schema-crm": "^1.0.0"
+    "@tindevelopers/adapter-kit": "1.3.0",
+    "@tindevelopers/schema-crm": "^1.0.0",
+    "server-only": "^0.0.1"
   },
   "peerDependencies": {
     "@tindevelopers/core-kernel": "^1.0.0"

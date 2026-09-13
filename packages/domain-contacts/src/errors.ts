@@ -36,3 +36,20 @@ export class TenantIdRequiredError extends Error {
     this.name = "TenantIdRequiredError";
   }
 }
+
+/**
+ * A segment definition filters on `lifecycleStage`, which has no backing
+ * column on the hosted schema (ground-truth drift: `contacts.lifecycle_stage`
+ * does not exist — querying it provokes Postgres 42703). The segment
+ * materializer throws this BEFORE any DB call instead of crashing at the
+ * query.
+ */
+export class LifecycleStageUnsupportedError extends Error {
+  constructor(options?: ErrorOptions) {
+    super(
+      "Segment filtering by lifecycleStage is not supported: contacts.lifecycle_stage does not exist on the hosted schema.",
+      options,
+    );
+    this.name = "LifecycleStageUnsupportedError";
+  }
+}
