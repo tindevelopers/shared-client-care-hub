@@ -93,6 +93,15 @@ module.exports = {
       conditionNames: ["import", "require", "node", "default", "types"],
       extensions: [".ts", ".tsx", ".js", ".jsx", ".json"],
     },
-    exclude: { path: ["node_modules", "dist"] },
+    // `exclude` removes modules from the graph BEFORE rule evaluation —
+    // unlike doNotFollow above, which only stops recursion and leaves the
+    // edge in place as a graph leaf for rule matching. Listing node_modules
+    // here would strip every resolved dependency edge and silently defeat
+    // the node_modules-path matchers of no-vendor-in-domain and
+    // domains-never-import-admin-client (proven by the resolved-path cases
+    // in tests/boundary/rules-fire.test.ts). Only package build output is
+    // excluded, anchored to packages/*/dist so nothing under a real
+    // node_modules path (e.g. core-kernel's dist/) can ever match it.
+    exclude: { path: ["^packages/[^/]+/dist/"] },
   },
 };

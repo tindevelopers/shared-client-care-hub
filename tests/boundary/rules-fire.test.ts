@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,10 +23,25 @@ function fixture(relPath: string, contents: string): void {
   created.push(relPath);
 }
 
+/**
+ * Fabricates a resolvable bare-name module inside a workspace package's own
+ * node_modules (removed in afterEach with everything else). Used to prove the
+ * resolved node_modules-path half of rules-fire coverage without installing a
+ * real (and hub-forbidden) vendor SDK.
+ */
+function vendorModuleFixture(pkg: string, name: string): void {
+  const base = `packages/${pkg}/node_modules/${name}`;
+  fixture(
+    `${base}/package.json`,
+    `${JSON.stringify({ name, version: "0.0.0-fixture", main: "index.js" })}\n`,
+  );
+  fixture(`${base}/index.js`, "module.exports = {};\n");
+  created.push(`packages/${pkg}/node_modules`);
+}
+
 afterEach(() => {
   for (const rel of created.splice(0)) {
-    const abs = resolve(root, rel);
-    if (existsSync(abs)) rmSync(abs);
+    rmSync(resolve(root, rel), { recursive: true, force: true });
   }
 });
 
@@ -97,6 +112,29 @@ function violatedRules(out: string): string[] {
   }
 }
 
+function violationsOf(out: string): Array<{ rule: string; from: string; to: string }> {
+  try {
+    const json = firstJsonDocument(out) as
+      | {
+          summary?: {
+            violations?: Array<{
+              rule?: { name?: string };
+              from?: string;
+              to?: string;
+            }>;
+          };
+        }
+      | undefined;
+    return (json?.summary?.violations ?? []).map((v) => ({
+      rule: v.rule?.name ?? "",
+      from: v.from ?? "",
+      to: v.to ?? "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function cruisedSources(out: string): string[] {
   try {
     const json = firstJsonDocument(out) as
@@ -129,13 +167,34 @@ describe("dependency-cruiser boundary rules fire", () => {
     expect(violatedRules(out)).toContain("no-domain-to-domain-reverse");
   });
 
-  it("R1: a domain importing a vendor SDK is caught", () => {
+  it("R1: a domain importing a vendor SDK is caught (unresolved specifier)", () => {
+    // No vendor SDK is (or ever may be) installed in this hub, so `stripe`
+    // stays unresolved and the bare-specifier alternative of the rule is
+    // what fires — the everyday violation shape.
     fixture(
       "packages/domain-contacts/src/__violation.ts",
       'import Stripe from "stripe";\nexport const s = Stripe;\n',
     );
     const { out } = depcruiseReport();
     expect(violatedRules(out)).toContain("no-vendor-in-domain");
+  });
+
+  it("R1: vendor ban fires on the RESOLVED node_modules path", () => {
+    // Fabricate the smallest resolvable vendor module inside the fixture
+    // package's own node_modules, so the import RESOLVES and only the
+    // rule's node_modules/<vendor>/ matcher can catch it. This case FAILS
+    // if options.exclude ever lists node_modules again — the resolved edge
+    // would be stripped from the graph before rule evaluation (scrutiny
+    // round 1 blocking issue).
+    vendorModuleFixture("domain-contacts", "stripe");
+    fixture(
+      "packages/domain-contacts/src/__violation.ts",
+      'import Stripe from "stripe";\nexport const s = Stripe;\n',
+    );
+    const { out } = depcruiseReport();
+    const hit = violationsOf(out).find((v) => v.rule === "no-vendor-in-domain");
+    expect(hit).toBeTruthy();
+    expect(hit?.to).toContain("node_modules/stripe");
   });
 
   it("packages may not import the Next.js '@/' alias", () => {
@@ -147,13 +206,25 @@ describe("dependency-cruiser boundary rules fire", () => {
     expect(violatedRules(out)).toContain("no-apps-import");
   });
 
-  it("domains never import core-kernel's admin-client (bare specifier)", () => {
+  it("domains never import core-kernel's admin-client — RESOLVED node_modules path", () => {
+    // core-kernel@1.0.0 is a real root devDependency, so this import
+    // RESOLVES (exports-map wildcard ./* -> ./dist/*.js) to
+    // .../node_modules/@tindevelopers/core-kernel/dist/database/admin-client.js
+    // and only the rule's node_modules-path alternatives can match — exactly
+    // the "declared and installed and the import resolves" scenario of
+    // VAL-HUB-011. This case FAILS if options.exclude ever lists node_modules
+    // again (resolved edge stripped before rule evaluation), and also if the
+    // core-kernel devDependency is removed (nothing left to resolve).
     fixture(
       "packages/domain-contacts/src/__violation.ts",
       'import { createAdminClient } from "@tindevelopers/core-kernel/database/admin-client";\nexport const c = createAdminClient;\n',
     );
     const { out } = depcruiseReport();
-    expect(violatedRules(out)).toContain("domains-never-import-admin-client");
+    const hit = violationsOf(out).find(
+      (v) => v.rule === "domains-never-import-admin-client",
+    );
+    expect(hit).toBeTruthy();
+    expect(hit?.to).toContain("node_modules/@tindevelopers/core-kernel");
   });
 
   it("domain-contacts importing core-kernel is ALLOWED (correct direction)", () => {
@@ -162,14 +233,14 @@ describe("dependency-cruiser boundary rules fire", () => {
       'import { createLogger } from "@tindevelopers/core-kernel/logger";\nexport const l = createLogger("x");\n',
     );
     const { out } = depcruiseReport();
-    expect(violatedRules(out)).not.toContain("no-domain-to-domain");
-    // Prove the fixture was actually cruised, so "no violation" cannot mean
-    // "the import was never seen". The core-kernel edge itself is invisible
-    // in this report: it resolves into node_modules, which the config's
-    // exclude.path strips from the JSON output. Parsing of this exact import
-    // shape is proven by the domain-campaigns case above, so "module cruised
-    // + rule did not fire" is the strongest signal available that the allowed
-    // direction was evaluated, not missed.
+    // core-kernel is installed and node_modules edges survive to rule
+    // evaluation, so the allowed import is genuinely seen by every rule.
+    // Assert NO rule fires from this fixture (not just one named rule) and
+    // that the fixture was actually cruised, so "no violation" cannot mean
+    // "the import was never seen".
+    expect(
+      violationsOf(out).filter((v) => v.from.includes("src/__ok.ts")),
+    ).toEqual([]);
     expect(cruisedSources(out).some((s) => s.endsWith("src/__ok.ts"))).toBe(true);
   });
 
