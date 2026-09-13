@@ -24,3 +24,15 @@ export class ContactNotFoundError extends Error {
     this.name = "ContactNotFoundError";
   }
 }
+
+/**
+ * A system-tier method was called without a tenant scope. System-tier
+ * writers take an explicit `tenantId` on every call (hardening over the
+ * id-only service-role writers they absorb).
+ */
+export class TenantIdRequiredError extends Error {
+  constructor(options?: ErrorOptions) {
+    super("tenantId is required.", options);
+    this.name = "TenantIdRequiredError";
+  }
+}
