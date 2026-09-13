@@ -19,6 +19,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@tindevelopers/core-kernel": "1.0.0",
+    "@tindevelopers/schema-crm": "workspace:*",
     "@types/node": "^22.10.5",
     "dependency-cruiser": "^16.10.4",
     "eslint": "^9.39.2",
