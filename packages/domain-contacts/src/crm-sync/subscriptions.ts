@@ -29,6 +29,10 @@ import { syncContactFromEvent } from "./crm-sync-service.js";
 import type { CrmSyncDeps } from "./crm-sync-service.js";
 import { createLogger } from "@tindevelopers/core-kernel/logger";
 
+// Re-exported so the ./crm-sync subpath (this module) is the single seam for
+// consumers needing direct access to the sync (e.g. the Brevo backfill route).
+export { syncContactFromEvent } from "./crm-sync-service.js";
+
 const log = createLogger("crm-sync/subscriptions");
 
 // ──── Event types that trigger contact sync ─────────────────────────────

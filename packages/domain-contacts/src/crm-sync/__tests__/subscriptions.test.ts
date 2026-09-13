@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   registerCrmSyncSubscribers,
   unregisterCrmSyncSubscribers,
+  syncContactFromEvent,
 } from "../subscriptions";
 
 describe("crmSync subscriptions", () => {
@@ -20,6 +21,12 @@ describe("crmSync subscriptions", () => {
 
   afterEach(() => {
     unregisterCrmSyncSubscribers();
+  });
+
+  it("re-exports syncContactFromEvent through the ./crm-sync subpath seam", () => {
+    // The export map routes ./crm-sync to this module only; the consumer
+    // backfill route needs direct access to the sync function.
+    expect(typeof syncContactFromEvent).toBe("function");
   });
 
   it("registers subscribers for all sync-relevant event types", () => {
