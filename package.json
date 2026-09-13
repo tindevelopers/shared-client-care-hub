@@ -1,0 +1,27 @@
+{
+  "name": "shell-base-crm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CRM domain hub: schema-crm, domain-contacts, and domain-campaigns packages",
+  "packageManager": "pnpm@10.6.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "type-check": "pnpm -r type-check",
+    "test": "depcruise --config .dependency-cruiser.cjs packages && vitest run --passWithNoTests",
+    "build": "pnpm -r build",
+    "quality": "pnpm lint && pnpm type-check && pnpm test && pnpm build",
+    "audit": "pnpm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^22.10.5",
+    "dependency-cruiser": "^16.10.4",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.50.0",
+    "vitest": "^3.2.7"
+  }
+}

@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+allowBuilds:
+  core-js: false
+  esbuild: false
+minimumReleaseAgeExclude:
+  - '@tindevelopers/core-kernel@0.2.0-rc.4 || 1.0.0'
