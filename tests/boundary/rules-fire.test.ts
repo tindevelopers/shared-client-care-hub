@@ -8,13 +8,20 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, rmdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const CONFIG = ".dependency-cruiser.cjs";
 const created: string[] = [];
+/**
+ * Directories to rmdir ONLY when empty after fixture removal. Never rmSync'd
+ * recursively: `packages/<pkg>/node_modules` is a real pnpm symlink farm once
+ * a package has dependencies (domain-contacts gained the first ones), and
+ * rmSync(recursive, force) on it deletes the package's entire install.
+ */
+const pruneIfEmpty: string[] = [];
 
 function fixture(relPath: string, contents: string): void {
   const abs = resolve(root, relPath);
@@ -25,9 +32,10 @@ function fixture(relPath: string, contents: string): void {
 
 /**
  * Fabricates a resolvable bare-name module inside a workspace package's own
- * node_modules (removed in afterEach with everything else). Used to prove the
- * resolved node_modules-path half of rules-fire coverage without installing a
- * real (and hub-forbidden) vendor SDK.
+ * node_modules (the fabricated module dir is removed in afterEach; the
+ * package's node_modules itself is only pruned when the fixture leaves it
+ * empty). Used to prove the resolved node_modules-path half of rules-fire
+ * coverage without installing a real (and hub-forbidden) vendor SDK.
  */
 function vendorModuleFixture(pkg: string, name: string): void {
   const base = `packages/${pkg}/node_modules/${name}`;
@@ -36,12 +44,20 @@ function vendorModuleFixture(pkg: string, name: string): void {
     `${JSON.stringify({ name, version: "0.0.0-fixture", main: "index.js" })}\n`,
   );
   fixture(`${base}/index.js`, "module.exports = {};\n");
-  created.push(`packages/${pkg}/node_modules`);
+  created.push(base);
+  pruneIfEmpty.push(`packages/${pkg}/node_modules`);
 }
 
 afterEach(() => {
   for (const rel of created.splice(0)) {
     rmSync(resolve(root, rel), { recursive: true, force: true });
+  }
+  for (const rel of pruneIfEmpty.splice(0)) {
+    try {
+      rmdirSync(resolve(root, rel));
+    } catch {
+      // Not empty — the package has a real node_modules; keep it.
+    }
   }
 });
 
