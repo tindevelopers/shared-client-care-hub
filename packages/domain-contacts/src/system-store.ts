@@ -1,4 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type {
+  ContactSyncInboundWrite,
+  ContactSyncLogEntry,
+  ContactSyncOutboundQuery,
+  ContactSyncOutboundWriteBack,
+  KonnectContact,
+} from "@tindevelopers/adapter-kit/crm/providers/gohighlevel-contact-sync";
 import type { SyncDirection, SyncEntityType, SyncStateRow } from "@tindevelopers/schema-crm";
 import { TenantIdRequiredError } from "./errors.js";
 import type {
@@ -39,6 +46,10 @@ import type {
  *   `crm-sync-service.ts` contact read + projection build and the
  *   "Adjacent write" `sync_state` upsert
  *   (`onConflict "entity_type, entity_id, provider_slug"`, Brevo defaults).
+ * - GHL persistence tier (`applyInbound` / `listOutbound` /
+ *   `markOutboundSynced` / `appendSyncLog`) — the W20–W22 writers from the
+ *   published adapter-kit GHL contact sync, ported via its
+ *   ContactSyncPersistence seam (see the tier comment below).
  *
  * Hardening over the absorbed writers: every method takes an explicit
  * `tenantId` (W12/W14/W15/W16/W1/W2 were id-only) and binds it into every
@@ -130,6 +141,38 @@ export interface SystemContactsStore {
     lastSyncDirection?: SyncDirection;
     conflictFlag?: boolean;
   }): Promise<void>;
+
+  // ── GHL persistence tier — adapter-kit ContactSyncPersistence seam ──────
+  //
+  // These four methods are the domain-contacts implementation of
+  // adapter-kit's `ContactSyncPersistence` port (the composition root passes
+  // the system store itself as `{ persistence }`). Port shapes are imported
+  // from adapter-kit so parity is compiler-enforced; payloads are ports of
+  // the adapter's Supabase-backed default persistence, which preserves the
+  // legacy W20–W22 writer shapes byte-for-byte:
+  // - `applyInbound` — W20 update (adapter-matched row, non-empty-wins
+  //   scalars + custom_fields key merge + explicit `updated_at`, scoped by
+  //   id + tenant) or W21 insert (no match).
+  // - `listOutbound` — the legacy bulk outbound listing: every tenant
+  //   contact, `created_at` ascending, window `range(offset, offset+limit-1)`.
+  // - `markOutboundSynced` — W22 write-back: `ghl_contact_id`,
+  //   `ghl_last_synced_at`, adapter-merged `custom_fields`, `updated_at`
+  //   (the BEFORE UPDATE trigger owns `updated_at` regardless), scoped by
+  //   id + tenant.
+  // - `appendSyncLog` — the `contact_sync_log` insert that accompanies
+  //   every W20–W22 outcome (20260320100000 column set, `synced_at` = now).
+
+  /** Apply one inbound GHL → Konnect write decision (W20 update / W21 insert). */
+  applyInbound(input: ContactSyncInboundWrite): Promise<{ contactId: string }>;
+
+  /** List outbound sync candidates (legacy listing: tenant, created_at asc). */
+  listOutbound(input: ContactSyncOutboundQuery): Promise<KonnectContact[]>;
+
+  /** Write the GHL assignment back after a successful outbound push (W22). */
+  markOutboundSynced(input: ContactSyncOutboundWriteBack): Promise<void>;
+
+  /** Append one `contact_sync_log` row (bookkeeping for every W20–W22 outcome). */
+  appendSyncLog(entry: ContactSyncLogEntry): Promise<void>;
 }
 
 function assertTenantId(tenantId: string | undefined): void {
@@ -467,6 +510,78 @@ export function createSystemContactsStore(
         { onConflict: "entity_type, entity_id, provider_slug" },
       );
       if (error) throw error;
+    },
+
+    // ── GHL persistence tier (adapter-kit ContactSyncPersistence seam) ────
+
+    async applyInbound(input) {
+      assertTenantId(input.tenantId);
+
+      // W20: update the adapter-matched row.
+      if (input.existingContactId) {
+        const { data, error } = await client
+          .from("contacts")
+          .update(input.update)
+          .eq("id", input.existingContactId)
+          .eq("tenant_id", input.tenantId)
+          .select("id")
+          .single();
+
+        if (error) throw new Error(error.message);
+        return { contactId: String((data as { id: string }).id) };
+      }
+
+      // W21: no match — insert.
+      const { data, error } = await client
+        .from("contacts")
+        .insert(input.insert)
+        .select("id")
+        .single();
+
+      if (error) throw new Error(error.message);
+      return { contactId: String((data as { id: string }).id) };
+    },
+
+    async listOutbound(input) {
+      assertTenantId(input.tenantId);
+      const { data, error } = await client
+        .from("contacts")
+        .select("*")
+        .eq("tenant_id", input.tenantId)
+        .range(input.offset, input.offset + input.limit - 1)
+        .order("created_at", { ascending: true });
+
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as KonnectContact[]);
+    },
+
+    async markOutboundSynced(input) {
+      assertTenantId(input.tenantId);
+      const { error } = await client
+        .from("contacts")
+        .update({
+          ghl_contact_id: input.ghlContactId,
+          ghl_last_synced_at: input.syncedAt,
+          custom_fields: input.customFields,
+          updated_at: input.syncedAt,
+        })
+        .eq("id", input.contactId)
+        .eq("tenant_id", input.tenantId);
+      if (error) throw new Error(error.message);
+    },
+
+    async appendSyncLog(entry) {
+      assertTenantId(entry.tenantId);
+      const { error } = await client.from("contact_sync_log").insert({
+        tenant_id: entry.tenantId,
+        direction: entry.direction,
+        konnect_contact_id: entry.konnectContactId ?? null,
+        ghl_contact_id: entry.ghlContactId ?? null,
+        action: entry.action,
+        error_message: entry.errorMessage ?? null,
+        synced_at: new Date().toISOString(),
+      });
+      if (error) throw new Error(error.message);
     },
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "@tindevelopers/domain-contacts",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Contacts domain package — owns the canonical contacts aggregate: tenant-tier store, system-tier store, suppression + crm-sync subscribers, segment materializer",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
-    "@tindevelopers/adapter-kit": "1.3.0",
+    "@tindevelopers/adapter-kit": "1.5.0",
     "@tindevelopers/schema-crm": "^1.0.0",
     "server-only": "^0.0.1"
   },
