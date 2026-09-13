@@ -15,9 +15,11 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["**/*.ts", "**/*.tsx"],
+    files: ["**/*.ts", "**/*.tsx", "scripts/**/*.mjs"],
     rules: {
-      // TypeScript already enforces this with real type information.
+      // TypeScript already enforces this with real type information, and the
+      // scripts/*.mjs Node CLIs use runtime globals (process) that ESLint has
+      // no Node globals config for here.
       "no-undef": "off",
     },
   },

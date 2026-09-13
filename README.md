@@ -38,6 +38,10 @@ packages/
   domain-contacts/    contacts store (tenant + system tiers), subscribers,
                       segment materializer
   domain-campaigns/   campaign store, scheduling, campaign service
+scripts/
+  depcruise.mjs       depcruise CLI wrapper — restores non-zero exit codes
+                      for --output-type json runs (registered as the root
+                      `depcruise` npm script)
 tests/
   boundary/           dependency-cruiser rules-fire + env-scan guardrails
 ```

@@ -30,6 +30,10 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.2)
 
+  packages/domain-campaigns: {}
+
+  packages/domain-contacts: {}
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':
