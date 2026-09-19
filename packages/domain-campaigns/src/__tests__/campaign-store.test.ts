@@ -300,6 +300,34 @@ describe("campaign store write parity", () => {
     expect(opsOf(calls, "update")).toHaveLength(0);
   });
 
+  test("transition rejects inherited Object.prototype status keys with the typed error", async () => {
+    // A plain `value in transitions` guard accepts these: they resolve through
+    // the prototype chain to a function or object whose `.includes` is missing,
+    // so the failure escapes as a TypeError instead of the promised typed
+    // error. Only an own-property guard rejects them as unknown statuses.
+    const prototypeKeys = [
+      "constructor",
+      "toString",
+      "valueOf",
+      "hasOwnProperty",
+      "__proto__",
+    ];
+
+    for (const status of prototypeKeys) {
+      const drifted = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status };
+      const { client, calls } = createMockSupabase({ data: drifted, error: null });
+
+      const caught: unknown = await createCampaignStore(client, TENANT_A)
+        .transition(CAMPAIGN_ID, "cancel")
+        .catch((error: unknown) => error);
+
+      expect(caught, `status "${status}"`).toBeInstanceOf(InvalidCampaignTransitionError);
+      expect(caught, `status "${status}"`).not.toBeInstanceOf(TypeError);
+      expect((caught as Error).message, `status "${status}"`).toContain(status);
+      expect(opsOf(calls, "update"), `status "${status}"`).toHaveLength(0);
+    }
+  });
+
   test("transition rejects a null stored status with the typed error", async () => {
     const nullStatus = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: null };
     const { client, calls } = createMockSupabase({ data: nullStatus, error: null });

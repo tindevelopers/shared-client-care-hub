@@ -42,13 +42,37 @@ const DRAFT_COLUMNS = [
   "engagement",
 ] as const;
 
-/** The jsonb_to_recordset column-definition block: what the RPC reads. */
+/** The jsonb_to_record column-definition block: what the RPC reads. */
 function recordsetColumns(sql: string): string {
-  const start = sql.indexOf("jsonb_to_recordset(p_recipients) AS d(");
+  const start = sql.indexOf("jsonb_to_record(src.obj) AS d(");
   expect(start).toBeGreaterThan(-1);
   const rest = sql.slice(start);
   return rest.slice(0, rest.indexOf(");"));
 }
+
+/**
+ * The six NULLABLE columns that carry a DB default. The contract is exact:
+ * an ABSENT key gets the default, a PRESENT JSON null stores SQL NULL.
+ */
+const NULLABLE_DEFAULTED = [
+  ["timezone", "'America/New_York'"],
+  ["custom_fields", "'{}'::jsonb"],
+  ["status", "'pending'"],
+  ["attempts", "0"],
+  ["result", "'{}'::jsonb"],
+  ["engagement", "'{}'::jsonb"],
+] as const;
+
+/**
+ * The four NOT NULL columns with defaults. They cannot store NULL either way,
+ * so COALESCE remains correct for them.
+ */
+const NOT_NULL_DEFAULTED = [
+  ["conversation_status", "'not_started'"],
+  ["turn_count", "0"],
+  ["sms_opt_out", "false"],
+  ["retry_attempts", "0"],
+] as const;
 
 describe("atomic campaign recipient replacement RPC", () => {
   it("manifest references the replacement migration for campaign_recipients", () => {
@@ -119,19 +143,41 @@ describe("atomic campaign recipient replacement RPC", () => {
     expect(DRAFT_COLUMNS).toHaveLength(26);
   });
 
-  it("preserves the campaign_recipients column defaults for omitted draft fields", () => {
+  it("retains each source JSON object so key presence drives the nullable defaults", () => {
     const sql = readFileSync(migrationPath, "utf8");
 
-    expect(sql).toContain("COALESCE(d.timezone, 'America/New_York')");
-    expect(sql).toContain("COALESCE(d.custom_fields, '{}'::jsonb)");
-    expect(sql).toContain("COALESCE(d.status, 'pending')");
-    expect(sql).toContain("COALESCE(d.attempts, 0)");
-    expect(sql).toContain("COALESCE(d.result, '{}'::jsonb)");
-    expect(sql).toContain("COALESCE(d.conversation_status, 'not_started')");
-    expect(sql).toContain("COALESCE(d.turn_count, 0)");
-    expect(sql).toContain("COALESCE(d.sms_opt_out, false)");
-    expect(sql).toContain("COALESCE(d.retry_attempts, 0)");
-    expect(sql).toContain("COALESCE(d.engagement, '{}'::jsonb)");
+    // jsonb_to_record alone cannot distinguish an ABSENT key from a PRESENT
+    // JSON null — both surface as SQL NULL. The raw element object is kept
+    // alongside the expanded record so the two cases stay separable.
+    expect(sql).toContain("jsonb_array_elements(p_recipients) AS src(obj)");
+    expect(sql).toContain("jsonb_to_record(src.obj) AS d(");
+
+    for (const [column, fallback] of NULLABLE_DEFAULTED) {
+      expect(sql).toContain(
+        `CASE WHEN src.obj ? '${column}' THEN d.${column} ELSE ${fallback} END`,
+      );
+    }
+  });
+
+  it("stores SQL NULL, never a JSONB null literal, for an explicit JSON null", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    // jsonb_to_record already maps JSON null to SQL NULL for every column type
+    // including jsonb, so the present-key branch passes d.<column> through
+    // untouched and no COALESCE may swallow the caller's explicit null.
+    expect(sql).not.toContain("'null'::jsonb");
+    for (const [column] of NULLABLE_DEFAULTED) {
+      expect(sql).not.toContain(`COALESCE(d.${column},`);
+    }
+  });
+
+  it("keeps COALESCE only for the NOT NULL defaulted columns", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    for (const [column, fallback] of NOT_NULL_DEFAULTED) {
+      expect(sql).toContain(`COALESCE(d.${column}, ${fallback})`);
+    }
+    expect(sql.match(/COALESCE\(d\./g) ?? []).toHaveLength(NOT_NULL_DEFAULTED.length);
   });
 
   it("grants EXECUTE only to the intended Supabase roles", () => {

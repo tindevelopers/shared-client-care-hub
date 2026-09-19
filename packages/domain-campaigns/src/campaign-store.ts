@@ -74,9 +74,13 @@ const actionStatuses = {
  * produce a value outside the canonical union; without this guard such a value
  * would index `transitions` to undefined and escape as a TypeError instead of
  * the promised InvalidCampaignTransitionError.
+ *
+ * `Object.hasOwn` rather than `in`: the `in` operator also matches inherited
+ * Object.prototype keys, so a stored status of "constructor", "toString", or
+ * "__proto__" would resolve to a non-array and throw on `.includes`.
  */
 function isCampaignStatus(value: string | null | undefined): value is CampaignStatus {
-  return typeof value === "string" && value in transitions;
+  return typeof value === "string" && Object.hasOwn(transitions, value);
 }
 
 export function createCampaignStore(client: SupabaseClient, tenantId: string): CampaignStore {

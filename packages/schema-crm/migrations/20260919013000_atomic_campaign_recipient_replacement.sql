@@ -24,6 +24,16 @@
 --     validated parameters;
 --   * every relation is schema-qualified and `search_path` is pinned to
 --     `public, pg_temp` so a hostile temp object cannot shadow a reference.
+--
+-- Draft-field contract (why the raw element object is retained): the six
+-- NULLABLE columns that carry a default (`timezone`, `custom_fields`, `status`,
+-- `attempts`, `result`, `engagement`) distinguish an ABSENT key — which gets
+-- the column default — from a PRESENT JSON null, which stores SQL NULL. A
+-- plain `COALESCE` over the expanded record conflates the two, because
+-- `jsonb_to_record` maps both to SQL NULL; so each element is kept as `src.obj`
+-- and the branch is chosen by key presence. The four NOT NULL defaulted columns
+-- (`conversation_status`, `turn_count`, `sms_opt_out`, `retry_attempts`) cannot
+-- store NULL, so they keep COALESCE.
 
 CREATE OR REPLACE FUNCTION public.replace_campaign_recipients(
   p_campaign_id UUID,
@@ -66,10 +76,10 @@ BEGIN
   WHERE r.tenant_id = p_tenant_id
     AND r.campaign_id = p_campaign_id;
 
-  -- Ownership columns come from the validated parameters; every other column
-  -- is a canonical draft field. Omitted (or JSON-null) draft fields fall back
-  -- to the column default a direct insert would have produced. `id`,
-  -- `created_at`, and `updated_at` stay DB-owned.
+  -- Ownership columns come from the validated parameters; every other column is
+  -- a canonical draft field. An ABSENT nullable-defaulted key falls back to the
+  -- column default, while a PRESENT JSON null stores SQL NULL (see the contract
+  -- note in the header). `id`, `created_at`, and `updated_at` stay DB-owned.
   INSERT INTO public.campaign_recipients (
     tenant_id,
     campaign_id,
@@ -109,17 +119,24 @@ BEGIN
     d.last_name,
     d.phone,
     d.email,
-    COALESCE(d.timezone, 'America/New_York'),
+    -- The six NULLABLE defaulted columns keep the exact draft contract: an
+    -- ABSENT key falls back to the column default, a PRESENT JSON null stores
+    -- SQL NULL. jsonb_to_record maps JSON null to SQL NULL for every column
+    -- type (jsonb included), so passing d.<column> through untouched can never
+    -- store the JSONB value `null`.
+    CASE WHEN src.obj ? 'timezone' THEN d.timezone ELSE 'America/New_York' END,
     d.client_type,
-    COALESCE(d.custom_fields, '{}'::jsonb),
-    COALESCE(d.status, 'pending'),
+    CASE WHEN src.obj ? 'custom_fields' THEN d.custom_fields ELSE '{}'::jsonb END,
+    CASE WHEN src.obj ? 'status' THEN d.status ELSE 'pending' END,
     d.scheduled_at,
-    COALESCE(d.attempts, 0),
+    CASE WHEN src.obj ? 'attempts' THEN d.attempts ELSE 0 END,
     d.last_attempt_at,
     d.completed_at,
     d.call_control_id,
     d.conversation_id,
-    COALESCE(d.result, '{}'::jsonb),
+    CASE WHEN src.obj ? 'result' THEN d.result ELSE '{}'::jsonb END,
+    -- The four NOT NULL defaulted columns cannot hold NULL either way, so an
+    -- explicit JSON null still falls back to the default.
     COALESCE(d.conversation_status, 'not_started'),
     d.last_turn_at,
     COALESCE(d.turn_count, 0),
@@ -128,8 +145,9 @@ BEGIN
     d.last_inbound_at,
     d.provider_recipient_id,
     d.provider_message_id,
-    COALESCE(d.engagement, '{}'::jsonb)
-  FROM jsonb_to_recordset(p_recipients) AS d(
+    CASE WHEN src.obj ? 'engagement' THEN d.engagement ELSE '{}'::jsonb END
+  FROM jsonb_array_elements(p_recipients) AS src(obj)
+  CROSS JOIN LATERAL jsonb_to_record(src.obj) AS d(
     list_id UUID,
     contact_id UUID,
     first_name TEXT,
