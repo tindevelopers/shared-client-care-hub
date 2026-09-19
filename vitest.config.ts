@@ -5,7 +5,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     fileParallelism: false,
-    include: ["tests/**/*.test.ts", "packages/**/*.{test,spec}.ts"],
+    include: ["tests/**/*.test.ts", "packages/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/dist/**"],
     setupFiles: ["./vitest.setup.ts"],
     server: {
