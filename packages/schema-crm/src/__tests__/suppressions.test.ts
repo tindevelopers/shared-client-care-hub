@@ -45,4 +45,42 @@ describe("contact suppressions", () => {
     expect(sql).toContain("whatsapp_opt_out");
     expect(sql).toContain("SET search_path = public");
   });
+
+  it("forbids suppression identity mutation in the projection trigger", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    expect(sql).toContain("IS DISTINCT FROM OLD.tenant_id");
+    expect(sql).toContain("IS DISTINCT FROM OLD.contact_id");
+    expect(sql).toContain("IS DISTINCT FROM OLD.channel");
+    expect(sql).toContain("RAISE EXCEPTION");
+  });
+
+  it("pins suppressions to same-tenant contacts via composite foreign key", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS contacts_tenant_id_id_key");
+    expect(sql).toContain("FOREIGN KEY (tenant_id, contact_id)");
+    expect(sql).toContain("REFERENCES public.contacts (tenant_id, id) ON DELETE CASCADE");
+  });
+
+  it("excludes partner admins from every product tenant policy", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    // view USING + insert WITH CHECK + update USING/WITH CHECK + delete USING.
+    const guards = sql.match(/AND NOT public\.current_user_is_partner_admin\(\)/g) ?? [];
+    expect(guards.length).toBe(5);
+  });
+
+  it("canonical migration is rerunnable", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS public.contact_suppressions");
+    expect(sql).toContain("CREATE INDEX IF NOT EXISTS idx_contact_suppressions_tenant_id");
+    expect(sql).toContain("CREATE OR REPLACE FUNCTION public.project_contact_suppression()");
+    expect(sql).toContain("DROP TRIGGER IF EXISTS project_contact_suppression_to_contacts");
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "Users can view contact_suppressions in their tenant"',
+    );
+    expect(sql).toContain("DROP CONSTRAINT IF EXISTS campaigns_status_check");
+  });
 });
