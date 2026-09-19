@@ -1,10 +1,24 @@
 #!/usr/bin/env node
+/**
+ * Release-gate validation for workspace packages: explicit (non-wildcard)
+ * exports whose targets EXIST, MIT license metadata, and a package-local
+ * LICENSE file.
+ *
+ * Export-target existence only means something against freshly built output,
+ * so `pnpm quality` runs this AFTER `pnpm build`. The optional positional
+ * argument points the validator at another packages directory (used by
+ * tests/boundary/package-exports.test.ts to drive it against deterministic
+ * temporary fixtures instead of the gitignored `dist`); it defaults to the
+ * real workspace packages directory.
+ *
+ * Usage: node scripts/validate-packages.mjs [packagesDir]
+ */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packagesDir = resolve(root, "packages");
+const packagesDir = process.argv[2] ? resolve(process.argv[2]) : resolve(root, "packages");
 const errors = [];
 
 function validateExport(packageRoot, subpath, value) {
