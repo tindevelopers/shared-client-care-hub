@@ -52,7 +52,11 @@ tests/
 2. Every supported public entry point is listed explicitly in the top-level
    `exports` map and resolves to emitted JavaScript and declaration files.
 3. `tsconfig.json` sets `"declaration": true` — verify `dist/**/*.d.ts` exists.
-4. No `workspace:*` ranges in dependencies.
+4. `workspace:` ranges in source are allowed only when `pnpm pack`/publish
+   rewrites them to a concrete compatible version — verify the packed
+   manifest (`tar -xOf <tarball> package/package.json`) ships no
+   `workspace:` specifier. `pnpm validate:packages` and
+   `tests/boundary/workspace-publishability.test.ts` enforce this.
 5. Publish in dependency order; verify with `npm view <pkg> versions`.
 6. Published versions are immutable — bump, never re-publish.
 7. `npm deprecate` does not work on GitHub Packages (HTTP 400).

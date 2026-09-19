@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
  * Release-gate validation for workspace packages: explicit (non-wildcard)
- * exports whose targets EXIST, MIT license metadata, and a package-local
- * LICENSE file.
+ * exports whose targets EXIST, MIT license metadata, a package-local
+ * LICENSE file, and packed publishability — every `workspace:` dependency
+ * specifier must resolve to a workspace package with a concrete version so
+ * `pnpm pack`/publish rewrites it (source workspace ranges are allowed;
+ * unrewritable ones are not).
  *
  * Export-target existence only means something against freshly built output,
  * so `pnpm quality` runs this AFTER `pnpm build`. The optional positional
@@ -43,6 +46,25 @@ function validateExport(packageRoot, subpath, value) {
   }
 }
 
+const DEP_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+];
+
+// name → concrete version for every package in the workspace directory, so
+// `workspace:` specifiers can be proven rewritable at pack/publish time.
+const workspaceVersions = new Map();
+for (const packageDir of readdirSync(packagesDir)) {
+  const manifestPath = resolve(packagesDir, packageDir, "package.json");
+  if (!existsSync(manifestPath)) continue;
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (manifest.name && typeof manifest.version === "string" && manifest.version.length > 0) {
+    workspaceVersions.set(manifest.name, manifest.version);
+  }
+}
+
 for (const packageDir of readdirSync(packagesDir)) {
   const packageRoot = resolve(packagesDir, packageDir);
   const manifestPath = resolve(packageRoot, "package.json");
@@ -60,6 +82,17 @@ for (const packageDir of readdirSync(packagesDir)) {
 
   for (const [subpath, value] of Object.entries(manifest.exports ?? {})) {
     validateExport(packageRoot, subpath, value);
+  }
+
+  for (const field of DEP_FIELDS) {
+    for (const [dep, specifier] of Object.entries(manifest[field] ?? {})) {
+      if (!String(specifier).startsWith("workspace:")) continue;
+      if (!workspaceVersions.has(dep)) {
+        errors.push(
+          `${label}: ${field} "${dep}": workspace specifier cannot be rewritten for publish — no workspace package provides a concrete version`,
+        );
+      }
+    }
   }
 }
 

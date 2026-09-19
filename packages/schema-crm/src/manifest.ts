@@ -46,13 +46,20 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
     migrations: [
       "20260210100000_create_contact_groups.sql",
       "20260919010000_contact_lists_suppressions.sql",
+      "20260919012000_contact_membership_suppression_integrity.sql",
     ],
   },
   contact_group_members: {
-    migrations: ["20260210100000_create_contact_groups.sql"],
+    migrations: [
+      "20260210100000_create_contact_groups.sql",
+      "20260919012000_contact_membership_suppression_integrity.sql",
+    ],
   },
   contact_suppressions: {
-    migrations: ["20260919010000_contact_lists_suppressions.sql"],
+    migrations: [
+      "20260919010000_contact_lists_suppressions.sql",
+      "20260919012000_contact_membership_suppression_integrity.sql",
+    ],
   },
   campaigns: {
     migrations: [

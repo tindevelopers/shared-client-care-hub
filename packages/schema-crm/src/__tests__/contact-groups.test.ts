@@ -11,7 +11,7 @@ import {
 const NOW = "2026-09-19T10:00:00.000+00:00";
 const migrationPath = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../../migrations/20260919010000_contact_lists_suppressions.sql",
+  "../../migrations/20260919012000_contact_membership_suppression_integrity.sql",
 );
 
 describe("contact groups", () => {
@@ -63,8 +63,25 @@ describe("contact groups", () => {
     expect(sql).toContain("REFERENCES public.contact_groups (tenant_id, id) ON DELETE CASCADE");
     expect(sql).toContain("contact_group_members_tenant_contact_fkey");
     expect(sql).toContain("FOREIGN KEY (tenant_id, contact_id)");
+    expect(sql).toContain("REFERENCES public.contacts (tenant_id, id) ON DELETE CASCADE");
     // The permissive single-column FKs from 20260210100000 are replaced.
     expect(sql).toContain("DROP CONSTRAINT IF EXISTS contact_group_members_group_id_fkey");
     expect(sql).toContain("DROP CONSTRAINT IF EXISTS contact_group_members_contact_id_fkey");
+  });
+
+  it("deletes only invalid membership edges before adding the composite foreign keys", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    expect(sql).toContain("DELETE FROM public.contact_group_members AS m");
+    // Both same-tenant existence checks guard the delete (group AND contact).
+    expect(sql).toContain("FROM public.contact_groups AS g");
+    expect(sql).toContain("g.tenant_id = m.tenant_id");
+    expect(sql).toContain("FROM public.contacts AS c");
+    expect(sql).toContain("c.tenant_id = m.tenant_id");
+    // Cleanup runs before the FK conversion so it can never delete rows the
+    // new constraints would have kept.
+    expect(sql.indexOf("DELETE FROM public.contact_group_members")).toBeLessThan(
+      sql.indexOf("ADD CONSTRAINT contact_group_members_tenant_group_fkey"),
+    );
   });
 });

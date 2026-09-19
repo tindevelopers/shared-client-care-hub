@@ -13,6 +13,10 @@ const migrationPath = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../migrations/20260919010000_contact_lists_suppressions.sql",
 );
+const integrityMigrationPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../migrations/20260919012000_contact_membership_suppression_integrity.sql",
+);
 
 describe("contact suppressions", () => {
   it("parses the deployed contact_suppressions columns", () => {
@@ -52,11 +56,14 @@ describe("contact suppressions", () => {
     );
   });
 
-  it("adds the canonical updated_by actor column in the migration", () => {
-    const sql = readFileSync(migrationPath, "utf8");
+  it("adds the canonical updated_by actor column in the additive integrity migration", () => {
+    const sql = readFileSync(integrityMigrationPath, "utf8");
 
-    expect(sql).toContain("updated_by UUID REFERENCES public.users(id) ON DELETE SET NULL");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS updated_by UUID");
+    expect(sql).toContain("REFERENCES public.users(id) ON DELETE SET NULL");
+    // The Task 3 migration is never edited — upgraded databases get the
+    // column from the new additive file only.
+    expect(readFileSync(migrationPath, "utf8")).not.toContain("updated_by");
   });
 
   it("accepts exactly the canonical suppression channels", () => {
