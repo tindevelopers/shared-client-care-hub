@@ -233,13 +233,96 @@ describe("campaign store write parity", () => {
         createCampaignStore(client, TENANT_A).transition(CAMPAIGN_ID, action),
       ).resolves.toEqual(updated);
       expect(argsOf(calls, "update")).toEqual([[{ status: to }]]);
+      // The write is a compare-and-set: id + bound tenant + the OBSERVED source
+      // status, plus the live-row predicate, so a concurrent transition or
+      // soft-delete matches zero rows instead of overwriting the state machine.
       expect(argsOf(calls, "eq")).toEqual([
         ["id", CAMPAIGN_ID],
         ["tenant_id", TENANT_A],
         ["id", CAMPAIGN_ID],
         ["tenant_id", TENANT_A],
+        ["status", from],
+      ]);
+      expect(argsOf(calls, "is")).toEqual([
+        ["deleted_at", null],
+        ["deleted_at", null],
       ]);
       expect(argsOf(calls, "select")).toEqual([["*"], ["*"]]);
+    }
+  });
+
+  test("transition maps a zero-row CAS race to the typed transition error", async () => {
+    const running = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "running" };
+    // The row was read as running, but a concurrent writer moved it first: the
+    // compare-and-set update matches zero rows (PGRST116 via .single()).
+    const { client, calls } = createMockSupabase([
+      { data: running, error: null },
+      { data: null, error: { code: "PGRST116" } },
+    ]);
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(store.transition(CAMPAIGN_ID, "pause")).rejects.toBeInstanceOf(
+      InvalidCampaignTransitionError,
+    );
+    expect(argsOf(calls, "eq")).toEqual([
+      ["id", CAMPAIGN_ID],
+      ["tenant_id", TENANT_A],
+      ["id", CAMPAIGN_ID],
+      ["tenant_id", TENANT_A],
+      ["status", "running"],
+    ]);
+  });
+
+  test("transition rethrows non-race database errors", async () => {
+    const running = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "running" };
+    const { client } = createMockSupabase([
+      { data: running, error: null },
+      { data: null, error: { code: "42P01", message: "no table" } },
+    ]);
+
+    await expect(
+      createCampaignStore(client, TENANT_A).transition(CAMPAIGN_ID, "pause"),
+    ).rejects.toEqual({ code: "42P01", message: "no table" });
+  });
+
+  test("transition rejects an unexpected stored status with the typed error, not a TypeError", async () => {
+    const drifted = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "bounced" };
+    const { client, calls } = createMockSupabase({ data: drifted, error: null });
+    const store = createCampaignStore(client, TENANT_A);
+
+    const caught: unknown = await store
+      .transition(CAMPAIGN_ID, "cancel")
+      .catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(InvalidCampaignTransitionError);
+    expect(caught).not.toBeInstanceOf(TypeError);
+    expect((caught as Error).message).toContain("bounced");
+    expect(opsOf(calls, "update")).toHaveLength(0);
+  });
+
+  test("transition rejects a null stored status with the typed error", async () => {
+    const nullStatus = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: null };
+    const { client, calls } = createMockSupabase({ data: nullStatus, error: null });
+
+    await expect(
+      createCampaignStore(client, TENANT_A).transition(CAMPAIGN_ID, "cancel"),
+    ).rejects.toBeInstanceOf(InvalidCampaignTransitionError);
+    expect(opsOf(calls, "update")).toHaveLength(0);
+  });
+
+  test("transition rejects every action on terminal statuses", async () => {
+    const actions = ["schedule", "start", "pause", "resume", "complete", "cancel"] as const;
+
+    for (const from of ["completed", "cancelled"] as const) {
+      for (const action of actions) {
+        const row = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: from };
+        const { client, calls } = createMockSupabase({ data: row, error: null });
+
+        await expect(
+          createCampaignStore(client, TENANT_A).transition(CAMPAIGN_ID, action),
+        ).rejects.toBeInstanceOf(InvalidCampaignTransitionError);
+        expect(opsOf(calls, "update")).toHaveLength(0);
+      }
     }
   });
 
@@ -267,62 +350,77 @@ describe("campaign store write parity", () => {
     expect(opsOf(calls, "update")).toHaveLength(0);
   });
 
-  test("replaceRecipients validates ownership, tenant-scopes deletion, and injects ids", async () => {
-    const campaign = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "draft" };
+  test("replaceRecipients performs the whole replacement in one tenant-scoped RPC", async () => {
     const drafts = [
       { first_name: "Ada", phone: "+15550000001", email: "ada@example.com" },
       { first_name: "Grace", phone: "+15550000002" },
     ];
-    const { client, calls } = createMockSupabase([
-      { data: campaign, error: null },
-      { data: null, error: null },
-      { data: null, error: null },
-    ]);
+    const { client, calls } = createMockSupabase({ data: 2, error: null });
     const store = createCampaignStore(client, TENANT_A);
 
     await expect(store.replaceRecipients(CAMPAIGN_ID, drafts)).resolves.toEqual({
       replaced: 2,
     });
-    expect(argsOf(calls, "delete")).toEqual([[]]);
-    expect(argsOf(calls, "insert")).toEqual([
+
+    // Exactly one request. The RPC owns the campaign lock, the ownership
+    // re-check, and the delete+insert inside a single transaction — the store
+    // never issues separate delete/insert round trips.
+    expect(argsOf(calls, "rpc")).toEqual([
       [
-        [
-          { ...drafts[0], tenant_id: TENANT_A, campaign_id: CAMPAIGN_ID },
-          { ...drafts[1], tenant_id: TENANT_A, campaign_id: CAMPAIGN_ID },
-        ],
+        "replace_campaign_recipients",
+        {
+          p_campaign_id: CAMPAIGN_ID,
+          p_tenant_id: TENANT_A,
+          p_recipients: drafts,
+        },
       ],
     ]);
-    expect(argsOf(calls, "eq").slice(-2)).toEqual([
-      ["tenant_id", TENANT_A],
-      ["campaign_id", CAMPAIGN_ID],
-    ]);
+    expect(opsOf(calls, "from")).toHaveLength(0);
+    expect(opsOf(calls, "delete")).toHaveLength(0);
+    expect(opsOf(calls, "insert")).toHaveLength(0);
   });
 
-  test("replaceRecipients with empty input clears the bound campaign audience", async () => {
-    const campaign = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "draft" };
-    const { client, calls } = createMockSupabase([
-      { data: campaign, error: null },
-      { data: null, error: null },
-    ]);
+  test("replaceRecipients with empty input clears the audience through the same RPC", async () => {
+    const { client, calls } = createMockSupabase({ data: 0, error: null });
     const store = createCampaignStore(client, TENANT_A);
 
     await expect(store.replaceRecipients(CAMPAIGN_ID, [])).resolves.toEqual({
       replaced: 0,
     });
-    expect(opsOf(calls, "delete")).toHaveLength(1);
-    expect(opsOf(calls, "insert")).toHaveLength(0);
+    expect(argsOf(calls, "rpc")).toEqual([
+      [
+        "replace_campaign_recipients",
+        { p_campaign_id: CAMPAIGN_ID, p_tenant_id: TENANT_A, p_recipients: [] },
+      ],
+    ]);
+    expect(opsOf(calls, "from")).toHaveLength(0);
   });
 
-  test("replaceRecipients rejects cross-tenant campaign ids without deleting or inserting", async () => {
+  test("replaceRecipients treats a null RPC payload as zero replaced", async () => {
+    const { client } = createMockSupabase({ data: null, error: null });
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(store.replaceRecipients(CAMPAIGN_ID, [])).resolves.toEqual({
+      replaced: 0,
+    });
+  });
+
+  test("replaceRecipients propagates the RPC ownership rejection without touching recipients", async () => {
     const { client, calls } = createMockSupabase({
       data: null,
-      error: { code: "PGRST116" },
+      error: {
+        code: "42501",
+        message: "campaign is not a live campaign of the bound tenant",
+      },
     });
     const store = createCampaignStore(client, TENANT_A);
 
     await expect(
       store.replaceRecipients("foreign-id", [{ first_name: "Ada", phone: "+15550000001" }]),
-    ).rejects.toThrow("Campaign not found");
+    ).rejects.toEqual({
+      code: "42501",
+      message: "campaign is not a live campaign of the bound tenant",
+    });
     expect(opsOf(calls, "delete")).toHaveLength(0);
     expect(opsOf(calls, "insert")).toHaveLength(0);
   });
@@ -514,5 +612,42 @@ describe("campaign store tenant isolation (cross-tenant)", () => {
       const chain = calls.slice(calls.indexOf(w));
       expect(chain.some((c) => c.op === "eq" && c.args[0] === "tenant_id" && c.args[1] === TENANT_A)).toBe(true);
     }
+  });
+
+  test("cross-tenant: the transition compare-and-set write is tenant-filtered", async () => {
+    const running = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "running" };
+    const { client, calls } = createMockSupabase([
+      { data: running, error: null },
+      { data: { ...running, status: "paused" }, error: null },
+    ]);
+
+    await createCampaignStore(client, TENANT_A).transition(CAMPAIGN_ID, "pause");
+
+    const writeChain = calls.slice(calls.findIndex((c) => c.op === "update"));
+    expect(
+      writeChain.some(
+        (c) => c.op === "eq" && c.args[0] === "tenant_id" && c.args[1] === TENANT_A,
+      ),
+    ).toBe(true);
+    expect(writeChain.some((c) => c.op === "eq" && c.args[1] === TENANT_B)).toBe(false);
+    // Source status is part of the predicate, so a foreign/drifted row cannot match.
+    expect(
+      writeChain.some((c) => c.op === "eq" && c.args[0] === "status" && c.args[1] === "running"),
+    ).toBe(true);
+    expect(writeChain.some((c) => c.op === "is" && c.args[0] === "deleted_at")).toBe(true);
+  });
+
+  test("cross-tenant: replaceRecipients binds the tenant in the RPC payload", async () => {
+    const { client, calls } = createMockSupabase({ data: 0, error: null });
+    const store = createCampaignStore(client, TENANT_A);
+
+    await store.replaceRecipients("foreign-id", []);
+
+    const rpc = calls.find((c) => c.op === "rpc")!;
+    expect(rpc.args[0]).toBe("replace_campaign_recipients");
+    const params = rpc.args[1] as Record<string, unknown>;
+    expect(params.p_tenant_id).toBe(TENANT_A);
+    expect(params.p_tenant_id).not.toBe(TENANT_B);
+    expect(params.p_campaign_id).toBe("foreign-id");
   });
 });

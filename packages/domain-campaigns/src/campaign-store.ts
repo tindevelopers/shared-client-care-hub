@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CampaignRow } from "@tindevelopers/schema-crm";
 import type {
   CampaignCreateInput,
+  CampaignRecipientDraft,
   CampaignRecipientProjection,
   CampaignStatus,
   CampaignTransitionAction,
@@ -28,6 +29,12 @@ import { InvalidCampaignTransitionError } from "./types.js";
  * - `listRecipients` ← getCampaignRecipients  campaigns.ts:275-294 (13-column projection, range pagination)
  * - `getRecipientTimezoneStats` ← getRecipientTimezoneStats campaigns.ts:305-318 ('Unknown' bucketing)
  *
+ * Lifecycle and audience operations have no server-action antecedent:
+ * - `transition`         — compare-and-set against the single table below
+ * - `replaceRecipients`  — delegates to the `replace_campaign_recipients` RPC
+ *   (schema-crm 20260919013000), which owns the lock, the ownership
+ *   re-validation, and the delete+insert in one transaction
+ *
  * Injection-only: the store receives a `SupabaseClient` and a `tenantId` and
  * binds every query to that tenant; it never constructs a client, never
  * imports core-kernel's admin client module, and never reads the
@@ -38,7 +45,12 @@ import { InvalidCampaignTransitionError } from "./types.js";
 const RECIPIENT_SELECT =
   "id, campaign_id, first_name, last_name, phone, email, timezone, client_type, status, scheduled_at, attempts, completed_at, created_at";
 
-const transitions = {
+/**
+ * The one explicit lifecycle table: every allowed action per canonical status.
+ * `completed` and `cancelled` are terminal. Anything not listed here — including
+ * `paused → complete` — is rejected with InvalidCampaignTransitionError.
+ */
+const transitions: Record<CampaignStatus, readonly CampaignTransitionAction[]> = {
   draft: ["schedule", "start", "cancel"],
   scheduled: ["start", "pause", "cancel"],
   running: ["pause", "complete", "cancel"],
@@ -46,7 +58,7 @@ const transitions = {
   sent: ["complete"],
   completed: [],
   cancelled: [],
-} as const satisfies Record<CampaignStatus, readonly CampaignTransitionAction[]>;
+};
 
 const actionStatuses = {
   schedule: "scheduled",
@@ -56,6 +68,16 @@ const actionStatuses = {
   complete: "completed",
   cancel: "cancelled",
 } as const satisfies Record<CampaignTransitionAction, CampaignStatus>;
+
+/**
+ * Runtime guard for the stored status. The column is plain TEXT, so drift can
+ * produce a value outside the canonical union; without this guard such a value
+ * would index `transitions` to undefined and escape as a TypeError instead of
+ * the promised InvalidCampaignTransitionError.
+ */
+function isCampaignStatus(value: string | null | undefined): value is CampaignStatus {
+  return typeof value === "string" && value in transitions;
+}
 
 export function createCampaignStore(client: SupabaseClient, tenantId: string): CampaignStore {
   const campaigns = () => client.from("campaigns");
@@ -147,47 +169,54 @@ export function createCampaignStore(client: SupabaseClient, tenantId: string): C
       action: CampaignTransitionAction,
     ): Promise<CampaignRow> {
       const campaign = await this.get(campaignId);
-      const status = (campaign?.status as CampaignStatus | null | undefined) ?? null;
-      if (
-        !campaign ||
-        !status ||
-        !(transitions[status] as readonly CampaignTransitionAction[]).includes(action)
-      ) {
-        throw new InvalidCampaignTransitionError(status, action);
+      const stored = campaign?.status ?? null;
+      const allowed = isCampaignStatus(stored) ? transitions[stored] : undefined;
+
+      if (!campaign || !allowed || !allowed.includes(action)) {
+        throw new InvalidCampaignTransitionError(stored, action);
       }
 
+      // Compare-and-set: the OBSERVED source status and the live-row predicate
+      // are part of the UPDATE, so a concurrent transition or soft-delete
+      // matches zero rows instead of silently overwriting the state machine.
       const { data, error } = await campaigns()
         .update({ status: actionStatuses[action] })
         .eq("id", campaignId)
         .eq("tenant_id", tenantId)
+        .eq("status", stored)
+        .is("deleted_at", null)
         .select("*")
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // Zero rows means the source status or liveness moved under us — the
+        // same typed failure as an illegal transition, never a silent success.
+        if (error.code === "PGRST116") {
+          throw new InvalidCampaignTransitionError(stored, action);
+        }
+        throw error;
+      }
       return data as CampaignRow;
     },
 
-    async replaceRecipients(campaignId, rows): Promise<{ replaced: number }> {
-      const campaign = await this.get(campaignId);
-      if (!campaign) throw new Error("Campaign not found");
+    async replaceRecipients(
+      campaignId: string,
+      rows: CampaignRecipientDraft[],
+    ): Promise<{ replaced: number }> {
+      // One RPC = one transaction. `replace_campaign_recipients`
+      // (20260919013000) locks the live campaign row FOR UPDATE, re-validates
+      // ownership under the caller's RLS, then deletes and re-inserts the
+      // audience scoped to the bound tenant/campaign — so a failing insert
+      // rolls the delete back and concurrent replacements serialize instead of
+      // merging into the union of both audiences.
+      const { data, error } = await client.rpc("replace_campaign_recipients", {
+        p_campaign_id: campaignId,
+        p_tenant_id: tenantId,
+        p_recipients: rows,
+      });
 
-      const { error: deleteError } = await recipients()
-        .delete()
-        .eq("tenant_id", tenantId)
-        .eq("campaign_id", campaignId);
-      if (deleteError) throw deleteError;
-
-      if (rows.length > 0) {
-        const inserts = rows.map((row) => ({
-          ...row,
-          tenant_id: tenantId,
-          campaign_id: campaignId,
-        }));
-        const { error: insertError } = await recipients().insert(inserts);
-        if (insertError) throw insertError;
-      }
-
-      return { replaced: rows.length };
+      if (error) throw error;
+      return { replaced: (data as number | null) ?? 0 };
     },
 
     async getStats(campaignId: string): Promise<CampaignStats | null> {

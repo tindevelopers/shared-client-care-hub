@@ -5,9 +5,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *
  * Records every query-builder call (`from`, `insert`, `update`, `delete`,
  * `upsert`, `select`, `eq`, `in`, `or`, `order`, `limit`, `range`, `not`,
- * `is`, `contains`, `single`, `maybeSingle`) in order, so tests can assert the
- * EXACT query shape the store produces against the cataloged reader/writer
- * payloads from `apps/app/app/actions/campaigns/campaigns.ts`.
+ * `is`, `contains`, `single`, `maybeSingle`) and every `rpc` call in order, so
+ * tests can assert the EXACT query shape the store produces against the
+ * cataloged reader/writer payloads from
+ * `apps/app/app/actions/campaigns/campaigns.ts`.
  *
  * Terminal results: pass a single object for a sticky result, or an array for
  * a one-shot queue (each `await`/`single()`/`maybeSingle()` consumes the next
@@ -93,6 +94,10 @@ export function createMockSupabase(results: MockResult | MockResult[] = {}) {
     from: (table: string) => {
       calls.push({ op: "from", args: [table] });
       return builder;
+    },
+    rpc: async (fn: string, params?: unknown) => {
+      calls.push({ op: "rpc", args: [fn, params] });
+      return next();
     },
   };
 

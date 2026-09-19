@@ -78,6 +78,7 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
       "20260614140000_add_retry_attempts_to_campaign_recipients.sql",
       "20260614233000_extend_campaigns_for_marketing.sql",
       "20260615000002_fix_multiturn_sms_constraints.sql",
+      "20260919013000_atomic_campaign_recipient_replacement.sql",
     ],
   },
   contact_sync_log: {

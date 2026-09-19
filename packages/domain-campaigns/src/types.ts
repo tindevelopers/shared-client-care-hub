@@ -88,7 +88,12 @@ export type CampaignStatus =
   | "cancelled";
 
 export class InvalidCampaignTransitionError extends Error {
-  constructor(status: CampaignStatus | null, action: CampaignTransitionAction) {
+  /**
+   * `status` is the stored value that blocked the action. It is typed as a
+   * plain string so status drift (a value outside the canonical union) is
+   * reported verbatim instead of escaping as an implementation exception.
+   */
+  constructor(status: string | null, action: CampaignTransitionAction) {
     super(`Cannot ${action} campaign from status ${status ?? "unknown"}`);
     this.name = "InvalidCampaignTransitionError";
   }
@@ -143,10 +148,28 @@ export interface CampaignStore {
    * id matches zero rows and resolves without error.
    */
   softDelete(id: string): Promise<void>;
+  /**
+   * Apply one lifecycle action from the store's single transition table and
+   * return the updated canonical row. The write is a compare-and-set on
+   * (id, tenant_id, observed status, `deleted_at IS NULL`), so a concurrent
+   * transition or soft-delete matches zero rows. Any action outside the table —
+   * including `paused → complete`, terminal statuses, an unexpected stored
+   * status, and a missing/foreign campaign — rejects with
+   * `InvalidCampaignTransitionError` before or instead of writing.
+   */
   transition(
     campaignId: string,
     action: CampaignTransitionAction,
   ): Promise<CampaignRow>;
+  /**
+   * Atomically replace a campaign's audience with `rows`, resolving with the
+   * number of recipients inserted. Delegates to the tenant-aware
+   * `replace_campaign_recipients` RPC, which locks the live campaign row,
+   * re-validates ownership, and performs the delete+insert in one transaction
+   * scoped to the bound tenant/campaign. Ownership keys in `rows` are ignored;
+   * an empty array intentionally clears the audience. A missing, foreign, or
+   * soft-deleted campaign rejects with zero effect on the prior audience.
+   */
   replaceRecipients(
     campaignId: string,
     rows: CampaignRecipientDraft[],
