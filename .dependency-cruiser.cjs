@@ -64,6 +64,27 @@ module.exports = {
       to: { path: "^(apps/|@/)" },
     },
     {
+      name: "no-ui-crm-host-runtime-imports",
+      comment:
+        "ui-crm is host-agnostic presentation code and must not import app paths, " +
+        "Next.js, server-only modules, or vendor runtimes.",
+      severity: "error",
+      from: { path: "^packages/ui-crm/" },
+      to: {
+        path:
+          "^(apps/|@/|next($|/)|@supabase/|server-only($|/)|@unkey/|telnyx($|/)|brevo($|/)|resend($|/))" +
+          "|node_modules/(next/|@supabase/|server-only/|@unkey/|telnyx/|brevo/|resend/)",
+      },
+    },
+    {
+      name: "no-domain-import-ui-crm",
+      comment:
+        "Domain packages may not depend on presentation code from ui-crm.",
+      severity: "error",
+      from: { path: "^packages/domain-" },
+      to: { path: "^(@tindevelopers/ui-crm($|/)|packages/ui-crm/)" },
+    },
+    {
       name: "domains-never-import-admin-client",
       comment:
         "Enforcement input #2 — the service role is injection-only in this hub: " +

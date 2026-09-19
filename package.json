@@ -8,16 +8,19 @@
     "node": ">=24"
   },
   "scripts": {
+    "changeset": "changeset",
     "lint": "eslint . --max-warnings=0",
     "type-check": "pnpm -r type-check",
     "depcruise": "node scripts/depcruise.mjs",
     "lint:deps": "depcruise --config .dependency-cruiser.cjs packages",
     "test": "depcruise --config .dependency-cruiser.cjs packages && vitest run --passWithNoTests",
     "build": "pnpm -r build",
-    "quality": "pnpm lint && pnpm type-check && pnpm test && pnpm build",
+    "validate:packages": "node scripts/validate-packages.mjs",
+    "quality": "pnpm lint && pnpm type-check && pnpm test && pnpm build && pnpm validate:packages",
     "audit": "pnpm audit --audit-level=high"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
     "@eslint/js": "^9.39.2",
     "@tindevelopers/core-kernel": "1.0.0",
     "@tindevelopers/schema-crm": "workspace:*",

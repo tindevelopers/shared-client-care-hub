@@ -9,11 +9,16 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync, rmdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const CONFIG = ".dependency-cruiser.cjs";
+const require = createRequire(import.meta.url);
+const config = require(resolve(root, CONFIG)) as {
+  forbidden: Array<{ name: string }>;
+};
 const created: string[] = [];
 /**
  * Directories to rmdir ONLY when empty after fixture removal. Never rmSync'd
@@ -165,6 +170,12 @@ function cruisedSources(out: string): string[] {
 }
 
 describe("dependency-cruiser boundary rules fire", () => {
+  it("declares the UI CRM boundary rules", () => {
+    const ruleNames = config.forbidden.map((rule) => rule.name);
+    expect(ruleNames).toContain("no-ui-crm-host-runtime-imports");
+    expect(ruleNames).toContain("no-domain-import-ui-crm");
+  });
+
   it("R5: domain-contacts importing domain-campaigns is caught", () => {
     fixture(
       "packages/domain-contacts/src/__violation.ts",
@@ -220,6 +231,24 @@ describe("dependency-cruiser boundary rules fire", () => {
     );
     const { out } = depcruiseReport();
     expect(violatedRules(out)).toContain("no-apps-import");
+  });
+
+  it("ui-crm may not import host runtime dependencies", () => {
+    fixture(
+      "packages/ui-crm/src/__violation.ts",
+      'import { redirect } from "next/navigation";\nexport const r = redirect;\n',
+    );
+    const { out } = depcruiseReport();
+    expect(violatedRules(out)).toContain("no-ui-crm-host-runtime-imports");
+  });
+
+  it("domain packages may not import ui-crm", () => {
+    fixture(
+      "packages/domain-contacts/src/__violation.ts",
+      'import { CrmShell } from "@tindevelopers/ui-crm";\nexport const shell = CrmShell;\n',
+    );
+    const { out } = depcruiseReport();
+    expect(violatedRules(out)).toContain("no-domain-import-ui-crm");
   });
 
   it("domains never import core-kernel's admin-client — RESOLVED node_modules path", () => {
