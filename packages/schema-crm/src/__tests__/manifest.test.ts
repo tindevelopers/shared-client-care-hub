@@ -6,10 +6,13 @@ import { CRM_TABLE_NAMES, crmManifest, tables } from "../manifest";
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-const SEVEN_EXISTING = [
+const TEN_EXISTING = [
   "campaign_recipients",
   "campaigns",
   "contact_channels",
+  "contact_group_members",
+  "contact_groups",
+  "contact_suppressions",
   "contact_sync_log",
   "contacts",
   "field_mappings",
@@ -17,7 +20,6 @@ const SEVEN_EXISTING = [
 ];
 
 const NONEXISTENT_PROPOSALS = [
-  "contact_suppressions",
   "campaign_audiences",
   "campaign_messages",
   "campaign_schedules",
@@ -25,10 +27,11 @@ const NONEXISTENT_PROPOSALS = [
 ];
 
 describe("crm manifest", () => {
-  it("manifest lists exactly the seven existing tables", () => {
-    expect(Object.keys(crmManifest.tables).sort()).toEqual(SEVEN_EXISTING);
-    expect(Object.keys(tables).sort()).toEqual(SEVEN_EXISTING);
-    expect([...CRM_TABLE_NAMES].sort()).toEqual(SEVEN_EXISTING);
+  it("manifest lists exactly the ten existing tables", () => {
+    expect(Object.keys(crmManifest.tables).sort()).toEqual(TEN_EXISTING);
+    expect(Object.keys(tables).sort()).toEqual(TEN_EXISTING);
+    expect([...CRM_TABLE_NAMES].sort()).toEqual(TEN_EXISTING);
+    expect(Object.keys(crmManifest.tables)).toContain("contact_suppressions");
     for (const proposal of NONEXISTENT_PROPOSALS) {
       expect(crmManifest.tables).not.toHaveProperty(proposal);
     }

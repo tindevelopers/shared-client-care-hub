@@ -1,12 +1,12 @@
 /**
- * Manifest for the CRM shell schema package: EXACTLY the seven existing
- * tables. The five tables named in early Phase 2 drafts (`contact_suppressions`,
- * `campaign_audiences`, `campaign_messages`, `campaign_schedules`,
- * `crm_sync_logs`) do not exist and are deliberately absent.
+ * Manifest for the CRM shell schema package.
  */
 export const CRM_TABLE_NAMES = [
   "contacts",
   "contact_channels",
+  "contact_groups",
+  "contact_group_members",
+  "contact_suppressions",
   "campaigns",
   "campaign_recipients",
   "contact_sync_log",
@@ -27,7 +27,7 @@ export interface CrmSchemaManifest {
 }
 
 /**
- * The seven existing CRM tables, keyed by table name.
+ * The existing CRM tables, keyed by table name.
  */
 export const tables: Record<CrmTableName, CrmTableInfo> = {
   contacts: {
@@ -42,6 +42,18 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
   contact_channels: {
     migrations: ["20260615000001_create_conversations_module.sql"],
   },
+  contact_groups: {
+    migrations: [
+      "20260210100000_create_contact_groups.sql",
+      "20260919010000_contact_lists_suppressions.sql",
+    ],
+  },
+  contact_group_members: {
+    migrations: ["20260210100000_create_contact_groups.sql"],
+  },
+  contact_suppressions: {
+    migrations: ["20260919010000_contact_lists_suppressions.sql"],
+  },
   campaigns: {
     migrations: [
       "20260210000000_create_campaign_tables.sql",
@@ -49,6 +61,7 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
       "20260310000000_add_campaign_timezone.sql",
       "20260614120000_create_conversation_tables.sql",
       "20260614233000_extend_campaigns_for_marketing.sql",
+      "20260919010000_contact_lists_suppressions.sql",
     ],
   },
   campaign_recipients: {

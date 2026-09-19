@@ -103,6 +103,7 @@ describe("campaigns", () => {
 
   it("campaigns status enum rejects invalid value", () => {
     expect(campaignStatusSchema.safeParse("draft").success).toBe(true);
+    expect(campaignStatusSchema.parse("sent")).toBe("sent");
     expect(campaignStatusSchema.safeParse("archived").success).toBe(false);
     expect(campaignRowSchema.safeParse({ ...campaignFixture, status: "paused" }).success).toBe(true);
     expect(

@@ -20,6 +20,7 @@ export const campaignStatusSchema = z.enum([
   "paused",
   "completed",
   "cancelled",
+  "sent",
 ]);
 export type CampaignStatus = z.infer<typeof campaignStatusSchema>;
 
