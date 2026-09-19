@@ -49,7 +49,8 @@ tests/
 ## Publishing checklist (non-negotiable)
 
 1. `exports` top-level — `npm publish` ignores `publishConfig.exports`.
-2. `exports` includes the `"./*"` wildcard for deep subpaths.
+2. Every supported public entry point is listed explicitly in the top-level
+   `exports` map and resolves to emitted JavaScript and declaration files.
 3. `tsconfig.json` sets `"declaration": true` — verify `dist/**/*.d.ts` exists.
 4. No `workspace:*` ranges in dependencies.
 5. Publish in dependency order; verify with `npm view <pkg> versions`.
