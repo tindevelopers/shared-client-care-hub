@@ -7,8 +7,9 @@
  * - The validator CLI rejects a `workspace:` specifier that no workspace
  *   package can rewrite to a concrete version (fixture-driven accept/reject).
  * - `pnpm pack` on the real domain-contacts package is proven to rewrite the
- *   `@tindevelopers/schema-crm` dependency to the concrete workspace version,
- *   and no packed manifest field retains a `workspace:` specifier.
+ *   `workspace:^` `@tindevelopers/schema-crm` dependency to a concrete caret
+ *   range of the workspace version, and no packed manifest field retains a
+ *   `workspace:` specifier.
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -100,7 +101,7 @@ describe("validate-packages CLI: workspace dependency publishability (fixtures)"
     fixturePackage(
       dir,
       "pkg",
-      validManifest({ dependencies: { "@fixture/dep": "workspace:*" } }),
+      validManifest({ dependencies: { "@fixture/dep": "workspace:^" } }),
     );
     const { exitCode, out } = runValidator(dir);
     expect(out).toContain("valid");
@@ -147,8 +148,11 @@ describe("pnpm pack rewrites workspace specifiers to concrete versions", () => {
         }),
       ) as Record<string, Record<string, string> | undefined>;
 
-      // workspace:* rewrites to the exact concrete workspace version.
-      expect(packed.dependencies?.["@tindevelopers/schema-crm"]).toBe(schemaCrm.version);
+      // workspace:^ rewrites to a concrete caret range of the workspace
+      // version, so a Changesets RC (e.g. 1.1.0-rc.0) packs compatibly.
+      expect(packed.dependencies?.["@tindevelopers/schema-crm"]).toBe(
+        `^${schemaCrm.version}`,
+      );
 
       for (const field of [
         "dependencies",
