@@ -1,20 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ContactRow } from "@tindevelopers/schema-crm";
-
-type ContactListKind = "list" | "segment";
-type ContactSegmentDefinition = { tags?: string[] };
-export type ContactGroupRow = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  description: string | null;
-  color: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  kind: ContactListKind;
-  definition: ContactSegmentDefinition | null;
-};
+import type {
+  ContactGroupRow,
+  ContactListKind,
+  ContactRow,
+  ContactSegmentDefinition,
+} from "@tindevelopers/schema-crm";
 
 type QueryResult = { data: unknown; error: unknown; count?: number | null };
 interface QueryBuilder extends PromiseLike<QueryResult> {
@@ -80,6 +70,19 @@ const SUPPORTED_SEGMENT_FILTERS = new Set([
   "customFields",
 ]);
 
+/**
+ * Tenant-tier contact lists (contact_groups) + membership store.
+ *
+ * The Supabase client is injected; the store never constructs one and binds
+ * every group, member, and contact query to `tenantId`.
+ *
+ * Membership tenant consistency is enforced twice:
+ * - store-side: `addMembers` verifies the group exists in this tenant and
+ *   narrows contact ids to this tenant's contacts BEFORE the upsert, so
+ *   cross-tenant group/contact ids are a provable zero-effect no-op;
+ * - DB-side: composite FKs on contact_group_members pin (tenant_id, group_id)
+ *   and (tenant_id, contact_id) (20260919010000 migration).
+ */
 export function createContactListsStore(
   client: SupabaseClient,
   tenantId: string,
@@ -97,6 +100,19 @@ export function createContactListsStore(
         ((data ?? []) as Array<{ contact_id: string }>).map((row) => row.contact_id),
       ),
     ];
+  }
+
+  /** Ids from `contactIds` that belong to this tenant, in input order. */
+  async function tenantOwnedContactIds(contactIds: string[]): Promise<string[]> {
+    const { data, error } = await table("contacts")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .in("id", contactIds);
+    if (error) throw error;
+    const owned = new Set(
+      ((data ?? []) as Array<{ id: string }>).map((row) => row.id),
+    );
+    return contactIds.filter((id) => owned.has(id));
   }
 
   return {
@@ -122,7 +138,6 @@ export function createContactListsStore(
     async create(input) {
       const { data, error } = await table("contact_groups")
         .insert({ ...input, tenant_id: tenantId })
-        .eq("tenant_id", tenantId)
         .select("*")
         .single();
       if (error) throw error;
@@ -152,14 +167,30 @@ export function createContactListsStore(
 
     async addMembers(groupId, contactIds) {
       if (contactIds.length === 0) return { inserted: 0 };
-      const rows = contactIds.map((contactId) => ({
+
+      // Zero effect unless the group itself belongs to this tenant.
+      const { data: group, error: groupError } = await table("contact_groups")
+        .select("id")
+        .eq("id", groupId)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      if (groupError) throw groupError;
+      if (!group) return { inserted: 0 };
+
+      // Zero effect for cross-tenant contact ids: only tenant-owned contacts
+      // reach the upsert (DB composite FKs are the second line of defense).
+      const ownedContactIds = await tenantOwnedContactIds(contactIds);
+      if (ownedContactIds.length === 0) return { inserted: 0 };
+
+      const rows = ownedContactIds.map((contactId) => ({
         tenant_id: tenantId,
         group_id: groupId,
         contact_id: contactId,
       }));
+      // ignoreDuplicates: existing memberships are not re-inserted, so the
+      // returned row count is exactly the number of newly inserted members.
       const { data, error } = await table("contact_group_members")
         .upsert(rows, { onConflict: "group_id,contact_id", ignoreDuplicates: true })
-        .eq("tenant_id", tenantId)
         .select("id");
       if (error) throw error;
       return { inserted: Array.isArray(data) ? data.length : 0 };
@@ -204,6 +235,8 @@ export function createContactListsStore(
       let query = table("contacts").select("*").eq("tenant_id", tenantId);
       if (definition.tags?.length) query = query.contains("tags", definition.tags);
 
+      // The hosted schema has no contacts.lifecycle_stage column; the stage
+      // filter is only supported as an explicit custom_fields entry.
       const customFields = {
         ...(definition.customFields ?? {}),
         ...(definition.lifecycleStage

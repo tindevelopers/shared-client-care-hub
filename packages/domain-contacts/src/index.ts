@@ -14,7 +14,6 @@ export {
 } from "./list-store.js";
 export type {
   ContactListCreate,
-  ContactGroupRow,
   ContactListsStore,
   ContactListUpdate,
   ContactSegmentPreview,
@@ -23,7 +22,6 @@ export { createContactSuppressionStore } from "./suppression-store.js";
 export type {
   ContactSuppressionSet,
   ContactSuppressionStore,
-  ContactSuppressionRow,
 } from "./suppression-store.js";
 export { materializeSegment } from "./campaigns/segment-materializer.js";
 export type {

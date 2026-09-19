@@ -7,6 +7,10 @@
 -- Security invariants enforced here:
 --   * a suppression always references a contact in the SAME tenant
 --     (composite FK onto contacts(tenant_id, id));
+--   * list membership is tenant-consistent: contact_group_members pins BOTH
+--     (tenant_id, group_id) and (tenant_id, contact_id) via composite FKs, so
+--     an own-tenant member row can never reference another tenant's group or
+--     contact;
 --   * suppression identity (tenant_id, contact_id, channel) is immutable, so
 --     the legacy-flag projection can never go stale from a moved row;
 --   * product tenant policies exclude Partner Admins — their only path into
@@ -25,6 +29,34 @@ ALTER TABLE public.contact_groups
 CREATE UNIQUE INDEX IF NOT EXISTS contacts_tenant_id_id_key
   ON public.contacts (tenant_id, id);
 
+-- Composite FK target for contact_group_members: a member row pins
+-- (tenant_id, group_id) to one contact_groups row, so membership can never
+-- cross tenants in either direction.
+CREATE UNIQUE INDEX IF NOT EXISTS contact_groups_tenant_id_id_key
+  ON public.contact_groups (tenant_id, id);
+
+-- Replace the single-column FKs from 20260210100000 (which allowed an
+-- own-tenant member row to reference another tenant's group or contact) with
+-- tenant-consistent composite FKs.
+ALTER TABLE public.contact_group_members
+  DROP CONSTRAINT IF EXISTS contact_group_members_group_id_fkey;
+ALTER TABLE public.contact_group_members
+  DROP CONSTRAINT IF EXISTS contact_group_members_contact_id_fkey;
+
+ALTER TABLE public.contact_group_members
+  DROP CONSTRAINT IF EXISTS contact_group_members_tenant_group_fkey;
+ALTER TABLE public.contact_group_members
+  ADD CONSTRAINT contact_group_members_tenant_group_fkey
+    FOREIGN KEY (tenant_id, group_id)
+    REFERENCES public.contact_groups (tenant_id, id) ON DELETE CASCADE;
+
+ALTER TABLE public.contact_group_members
+  DROP CONSTRAINT IF EXISTS contact_group_members_tenant_contact_fkey;
+ALTER TABLE public.contact_group_members
+  ADD CONSTRAINT contact_group_members_tenant_contact_fkey
+    FOREIGN KEY (tenant_id, contact_id)
+    REFERENCES public.contacts (tenant_id, id) ON DELETE CASCADE;
+
 CREATE TABLE IF NOT EXISTS public.contact_suppressions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -34,6 +66,9 @@ CREATE TABLE IF NOT EXISTS public.contact_suppressions (
   reason TEXT,
   source TEXT NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- Canonical actor column: who last set/unset this suppression (NULL for
+  -- system-driven writes). Persisted directly, not as a metadata convention.
+  updated_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT contact_suppressions_tenant_contact_channel_unique
@@ -42,6 +77,11 @@ CREATE TABLE IF NOT EXISTS public.contact_suppressions (
     FOREIGN KEY (tenant_id, contact_id)
     REFERENCES public.contacts (tenant_id, id) ON DELETE CASCADE
 );
+
+-- Rerun path: add the canonical actor column to a pre-existing table.
+ALTER TABLE public.contact_suppressions
+  ADD COLUMN IF NOT EXISTS updated_by UUID
+    REFERENCES public.users(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_contact_suppressions_tenant_id
   ON public.contact_suppressions(tenant_id);

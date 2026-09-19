@@ -17,9 +17,24 @@ export const contactSuppressionRowSchema = z
     reason: z.string().nullable(),
     source: z.string(),
     metadata: jsonb,
+    /** Canonical actor column: who last set/unset the suppression (NULL = system). */
+    updated_by: uuid.nullable(),
     created_at: timestamptz,
     updated_at: timestamptz,
   })
   .strict();
 
+/** Columns a caller must supply to UPSERT a suppression (rest have defaults). */
+export const contactSuppressionInsertSchema = contactSuppressionRowSchema
+  .omit({ id: true, created_at: true, updated_at: true })
+  .partial()
+  .extend({
+    tenant_id: uuid,
+    contact_id: uuid,
+    channel: suppressionChannelSchema,
+    source: z.string(),
+  })
+  .strict();
+
 export type ContactSuppressionRow = z.infer<typeof contactSuppressionRowSchema>;
+export type ContactSuppressionInsert = z.infer<typeof contactSuppressionInsertSchema>;

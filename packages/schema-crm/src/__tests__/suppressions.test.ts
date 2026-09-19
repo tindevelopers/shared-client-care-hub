@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { contactSuppressionRowSchema, suppressionChannelSchema } from "../suppressions";
+import {
+  contactSuppressionInsertSchema,
+  contactSuppressionRowSchema,
+  suppressionChannelSchema,
+} from "../suppressions";
 
 const NOW = "2026-09-19T10:00:00.000+00:00";
 const migrationPath = join(
@@ -21,12 +25,38 @@ describe("contact suppressions", () => {
       reason: "unsubscribe",
       source: "contact",
       metadata: { requestId: "req-1" },
+      updated_by: "9a1b2c3d-0000-4000-8000-000000000012",
       created_at: NOW,
       updated_at: NOW,
     };
 
     expect(contactSuppressionRowSchema.parse(row).channel).toBe("email");
+    expect(contactSuppressionRowSchema.parse({ ...row, updated_by: null }).updated_by).toBeNull();
     expect(contactSuppressionRowSchema.safeParse({ ...row, extra: true }).success).toBe(false);
+  });
+
+  it("types the canonical upsert payload with a dedicated updated_by column", () => {
+    const insert = {
+      tenant_id: "9a1b2c3d-0000-4000-8000-000000000010",
+      contact_id: "9a1b2c3d-0000-4000-8000-000000000003",
+      channel: "email",
+      suppressed: true,
+      reason: null,
+      source: "crm-ui",
+      updated_by: "9a1b2c3d-0000-4000-8000-000000000012",
+    };
+
+    expect(contactSuppressionInsertSchema.parse(insert).updated_by).toBe(insert.updated_by);
+    expect(contactSuppressionInsertSchema.safeParse({ ...insert, updated_by: "not-a-uuid" }).success).toBe(
+      false,
+    );
+  });
+
+  it("adds the canonical updated_by actor column in the migration", () => {
+    const sql = readFileSync(migrationPath, "utf8");
+
+    expect(sql).toContain("updated_by UUID REFERENCES public.users(id) ON DELETE SET NULL");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS updated_by UUID");
   });
 
   it("accepts exactly the canonical suppression channels", () => {
