@@ -12,6 +12,8 @@ export type ServiceRoleContactColumn =
   | "email_opt_out"
   | "email_valid"
   | "sms_opt_out"
+  | "whatsapp_opt_out"
+  | "dnc"
   | "ghl_contact_id"
   | "ghl_last_synced_at";
 

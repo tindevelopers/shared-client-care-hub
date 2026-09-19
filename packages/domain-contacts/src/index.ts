@@ -8,6 +8,23 @@ export { createContactsStore } from "./tenant-store.js";
 export type { ContactsStore } from "./tenant-store.js";
 export { createSystemContactsStore } from "./system-store.js";
 export type { SystemContactsStore } from "./system-store.js";
+export {
+  createContactListsStore,
+  UnsupportedSegmentFilterError,
+} from "./list-store.js";
+export type {
+  ContactListCreate,
+  ContactGroupRow,
+  ContactListsStore,
+  ContactListUpdate,
+  ContactSegmentPreview,
+} from "./list-store.js";
+export { createContactSuppressionStore } from "./suppression-store.js";
+export type {
+  ContactSuppressionSet,
+  ContactSuppressionStore,
+  ContactSuppressionRow,
+} from "./suppression-store.js";
 export { materializeSegment } from "./campaigns/segment-materializer.js";
 export type {
   MaterializedAudience,
