@@ -15,14 +15,18 @@
  * call-context-speech.
  */
 export { createCampaignStore } from "./campaign-store.js";
+export { InvalidCampaignTransitionError } from "./types.js";
 export { nextAllowedStartUtc } from "./scheduling.js";
 export { createMarketingCampaignService } from "./campaign-service.js";
 
 export type {
   CampaignCreateInput,
   CampaignRecipientProjection,
+  CampaignRecipientDraft,
   CampaignStats,
+  CampaignStatus,
   CampaignStore,
+  CampaignTransitionAction,
   CampaignUpdateInput,
   ListRecipientsOptions,
 } from "./types.js";

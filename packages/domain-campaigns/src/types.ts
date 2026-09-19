@@ -1,4 +1,9 @@
-import type { CampaignInsert, CampaignRow, CampaignUpdate } from "@tindevelopers/schema-crm";
+import type {
+  CampaignInsert,
+  CampaignRecipientInsert,
+  CampaignRow,
+  CampaignUpdate,
+} from "@tindevelopers/schema-crm";
 
 /**
  * Campaigns domain types.
@@ -58,6 +63,37 @@ export interface ListRecipientsOptions {
  */
 export type CampaignCreateInput = Partial<Omit<CampaignInsert, "tenant_id">>;
 
+/** Recipient insert with tenant and campaign ownership injected by the store. */
+export type CampaignRecipientDraft = Omit<
+  CampaignRecipientInsert,
+  "tenant_id" | "campaign_id"
+>;
+
+export type CampaignTransitionAction =
+  | "schedule"
+  | "start"
+  | "pause"
+  | "resume"
+  | "complete"
+  | "cancel";
+
+/** Canonical database statuses, including the marketing lifecycle's `sent`. */
+export type CampaignStatus =
+  | "draft"
+  | "scheduled"
+  | "running"
+  | "paused"
+  | "sent"
+  | "completed"
+  | "cancelled";
+
+export class InvalidCampaignTransitionError extends Error {
+  constructor(status: CampaignStatus | null, action: CampaignTransitionAction) {
+    super(`Cannot ${action} campaign from status ${status ?? "unknown"}`);
+    this.name = "InvalidCampaignTransitionError";
+  }
+}
+
 /**
  * Update input: a partial patch of the row. `id`, `tenant_id`, `created_at`,
  * and `updated_at` are never writable through the store — the DB trigger
@@ -65,8 +101,10 @@ export type CampaignCreateInput = Partial<Omit<CampaignInsert, "tenant_id">>;
  */
 export type CampaignUpdateInput = Omit<
   CampaignUpdate,
-  "id" | "tenant_id" | "created_at" | "updated_at"
->;
+  "id" | "tenant_id" | "created_at" | "updated_at" | "status"
+> & {
+  status?: CampaignStatus | null;
+};
 
 /**
  * Tenant-tier campaign store — the campaigns-table access seam whose query
@@ -105,6 +143,14 @@ export interface CampaignStore {
    * id matches zero rows and resolves without error.
    */
   softDelete(id: string): Promise<void>;
+  transition(
+    campaignId: string,
+    action: CampaignTransitionAction,
+  ): Promise<CampaignRow>;
+  replaceRecipients(
+    campaignId: string,
+    rows: CampaignRecipientDraft[],
+  ): Promise<{ replaced: number }>;
   /**
    * Tally of campaign_recipients.status into the exact CampaignStats shape
    * (getCampaignStats parity): unknown statuses increment `total` only;

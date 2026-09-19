@@ -56,6 +56,12 @@ function createFakeStore(seeded: Record<string, Record<string, unknown>> = {}) {
     async softDelete() {
       throw new Error("not used by the service");
     },
+    async transition() {
+      throw new Error("not used by the service");
+    },
+    async replaceRecipients() {
+      throw new Error("not used by the service");
+    },
     async getStats() {
       return null;
     },

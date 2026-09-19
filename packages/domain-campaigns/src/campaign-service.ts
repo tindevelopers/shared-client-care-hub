@@ -41,7 +41,7 @@ import type {
   MarketingAutomationProvider,
   MarketingCampaignReport,
 } from "@tindevelopers/adapter-kit/marketing/marketing-interface";
-import type { CampaignStore, CampaignUpdateInput } from "./types.js";
+import type { CampaignStore } from "./types.js";
 
 const log = createLogger("campaigns/service");
 
@@ -288,7 +288,7 @@ export function createMarketingCampaignService(
       await provider.sendCampaign(providerCampaignId);
 
       await deps.campaigns.update(konnectCampaignId, {
-        status: "sent" as unknown as CampaignUpdateInput["status"],
+        status: "sent",
       });
 
       log.info("Campaign sent", { konnectCampaignId, providerCampaignId });

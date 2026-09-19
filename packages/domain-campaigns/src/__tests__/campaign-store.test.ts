@@ -16,6 +16,7 @@
  */
 import { describe, expect, test } from "vitest";
 import { createCampaignStore } from "../campaign-store.js";
+import { InvalidCampaignTransitionError } from "../types.js";
 import type { CampaignUpdateInput } from "../types.js";
 import { createMockSupabase, type RecordedCall } from "./helpers/mock-supabase.js";
 
@@ -202,6 +203,128 @@ describe("campaign store write parity", () => {
       ["tenant_id", TENANT_A],
     ]);
     expect(argsOf(calls, "is")).toEqual([["deleted_at", null]]); // live rows only
+  });
+
+  test("transition supports every legal lifecycle action and returns the updated row", async () => {
+    const legalTransitions = [
+      ["draft", "schedule", "scheduled"],
+      ["draft", "start", "running"],
+      ["draft", "cancel", "cancelled"],
+      ["scheduled", "start", "running"],
+      ["scheduled", "pause", "paused"],
+      ["scheduled", "cancel", "cancelled"],
+      ["running", "pause", "paused"],
+      ["running", "complete", "completed"],
+      ["running", "cancel", "cancelled"],
+      ["paused", "resume", "running"],
+      ["paused", "cancel", "cancelled"],
+      ["sent", "complete", "completed"],
+    ] as const;
+
+    for (const [from, action, to] of legalTransitions) {
+      const current = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: from };
+      const updated = { ...current, status: to };
+      const { client, calls } = createMockSupabase([
+        { data: current, error: null },
+        { data: updated, error: null },
+      ]);
+
+      await expect(
+        createCampaignStore(client, TENANT_A).transition(CAMPAIGN_ID, action),
+      ).resolves.toEqual(updated);
+      expect(argsOf(calls, "update")).toEqual([[{ status: to }]]);
+      expect(argsOf(calls, "eq")).toEqual([
+        ["id", CAMPAIGN_ID],
+        ["tenant_id", TENANT_A],
+        ["id", CAMPAIGN_ID],
+        ["tenant_id", TENANT_A],
+      ]);
+      expect(argsOf(calls, "select")).toEqual([["*"], ["*"]]);
+    }
+  });
+
+  test("transition rejects paused → completed and other invalid actions with a typed error", async () => {
+    const paused = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "paused" };
+    const { client, calls } = createMockSupabase({ data: paused, error: null });
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(store.transition(CAMPAIGN_ID, "complete")).rejects.toBeInstanceOf(
+      InvalidCampaignTransitionError,
+    );
+    expect(opsOf(calls, "update")).toHaveLength(0);
+  });
+
+  test("transition rejects cross-tenant campaign ids before mutation", async () => {
+    const { client, calls } = createMockSupabase({
+      data: null,
+      error: { code: "PGRST116" },
+    });
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(store.transition("foreign-id", "start")).rejects.toBeInstanceOf(
+      InvalidCampaignTransitionError,
+    );
+    expect(opsOf(calls, "update")).toHaveLength(0);
+  });
+
+  test("replaceRecipients validates ownership, tenant-scopes deletion, and injects ids", async () => {
+    const campaign = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "draft" };
+    const drafts = [
+      { first_name: "Ada", phone: "+15550000001", email: "ada@example.com" },
+      { first_name: "Grace", phone: "+15550000002" },
+    ];
+    const { client, calls } = createMockSupabase([
+      { data: campaign, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+    ]);
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(store.replaceRecipients(CAMPAIGN_ID, drafts)).resolves.toEqual({
+      replaced: 2,
+    });
+    expect(argsOf(calls, "delete")).toEqual([[]]);
+    expect(argsOf(calls, "insert")).toEqual([
+      [
+        [
+          { ...drafts[0], tenant_id: TENANT_A, campaign_id: CAMPAIGN_ID },
+          { ...drafts[1], tenant_id: TENANT_A, campaign_id: CAMPAIGN_ID },
+        ],
+      ],
+    ]);
+    expect(argsOf(calls, "eq").slice(-2)).toEqual([
+      ["tenant_id", TENANT_A],
+      ["campaign_id", CAMPAIGN_ID],
+    ]);
+  });
+
+  test("replaceRecipients with empty input clears the bound campaign audience", async () => {
+    const campaign = { id: CAMPAIGN_ID, tenant_id: TENANT_A, status: "draft" };
+    const { client, calls } = createMockSupabase([
+      { data: campaign, error: null },
+      { data: null, error: null },
+    ]);
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(store.replaceRecipients(CAMPAIGN_ID, [])).resolves.toEqual({
+      replaced: 0,
+    });
+    expect(opsOf(calls, "delete")).toHaveLength(1);
+    expect(opsOf(calls, "insert")).toHaveLength(0);
+  });
+
+  test("replaceRecipients rejects cross-tenant campaign ids without deleting or inserting", async () => {
+    const { client, calls } = createMockSupabase({
+      data: null,
+      error: { code: "PGRST116" },
+    });
+    const store = createCampaignStore(client, TENANT_A);
+
+    await expect(
+      store.replaceRecipients("foreign-id", [{ first_name: "Ada", phone: "+15550000001" }]),
+    ).rejects.toThrow("Campaign not found");
+    expect(opsOf(calls, "delete")).toHaveLength(0);
+    expect(opsOf(calls, "insert")).toHaveLength(0);
   });
 });
 

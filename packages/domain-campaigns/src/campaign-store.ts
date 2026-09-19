@@ -3,11 +3,14 @@ import type { CampaignRow } from "@tindevelopers/schema-crm";
 import type {
   CampaignCreateInput,
   CampaignRecipientProjection,
+  CampaignStatus,
+  CampaignTransitionAction,
   CampaignStats,
   CampaignStore,
   CampaignUpdateInput,
   ListRecipientsOptions,
 } from "./types.js";
+import { InvalidCampaignTransitionError } from "./types.js";
 
 /**
  * Tenant-tier campaign store — owns every `campaigns` / `campaign_recipients`
@@ -35,9 +38,28 @@ import type {
 const RECIPIENT_SELECT =
   "id, campaign_id, first_name, last_name, phone, email, timezone, client_type, status, scheduled_at, attempts, completed_at, created_at";
 
+const transitions = {
+  draft: ["schedule", "start", "cancel"],
+  scheduled: ["start", "pause", "cancel"],
+  running: ["pause", "complete", "cancel"],
+  paused: ["resume", "cancel"],
+  sent: ["complete"],
+  completed: [],
+  cancelled: [],
+} as const satisfies Record<CampaignStatus, readonly CampaignTransitionAction[]>;
+
+const actionStatuses = {
+  schedule: "scheduled",
+  start: "running",
+  pause: "paused",
+  resume: "running",
+  complete: "completed",
+  cancel: "cancelled",
+} as const satisfies Record<CampaignTransitionAction, CampaignStatus>;
+
 export function createCampaignStore(client: SupabaseClient, tenantId: string): CampaignStore {
-  const campaigns = () => client.from("campaigns") as any;
-  const recipients = () => client.from("campaign_recipients") as any;
+  const campaigns = () => client.from("campaigns");
+  const recipients = () => client.from("campaign_recipients");
 
   return {
     async list(): Promise<CampaignRow[]> {
@@ -118,6 +140,54 @@ export function createCampaignStore(client: SupabaseClient, tenantId: string): C
         .is("deleted_at", null);
 
       if (error) throw error;
+    },
+
+    async transition(
+      campaignId: string,
+      action: CampaignTransitionAction,
+    ): Promise<CampaignRow> {
+      const campaign = await this.get(campaignId);
+      const status = (campaign?.status as CampaignStatus | null | undefined) ?? null;
+      if (
+        !campaign ||
+        !status ||
+        !(transitions[status] as readonly CampaignTransitionAction[]).includes(action)
+      ) {
+        throw new InvalidCampaignTransitionError(status, action);
+      }
+
+      const { data, error } = await campaigns()
+        .update({ status: actionStatuses[action] })
+        .eq("id", campaignId)
+        .eq("tenant_id", tenantId)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      return data as CampaignRow;
+    },
+
+    async replaceRecipients(campaignId, rows): Promise<{ replaced: number }> {
+      const campaign = await this.get(campaignId);
+      if (!campaign) throw new Error("Campaign not found");
+
+      const { error: deleteError } = await recipients()
+        .delete()
+        .eq("tenant_id", tenantId)
+        .eq("campaign_id", campaignId);
+      if (deleteError) throw deleteError;
+
+      if (rows.length > 0) {
+        const inserts = rows.map((row) => ({
+          ...row,
+          tenant_id: tenantId,
+          campaign_id: campaignId,
+        }));
+        const { error: insertError } = await recipients().insert(inserts);
+        if (insertError) throw insertError;
+      }
+
+      return { replaced: rows.length };
     },
 
     async getStats(campaignId: string): Promise<CampaignStats | null> {
