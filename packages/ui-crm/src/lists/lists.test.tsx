@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ContactsAdapter } from "../contacts";
@@ -70,8 +70,23 @@ const contact = {
   companyName: null,
 };
 
+const listTwo: ContactListVm = { ...list, id: "list-2", name: "Prospects" };
+const contactTwo = { ...contact, id: "contact-2", first_name: "Grace", last_name: "Hopper" };
+
 function ok<T>(data: T): CrmUiResult<T> {
   return { ok: true, data };
+}
+
+function failure<T = never>(message = "Try again", code = "temporary"): CrmUiResult<T> {
+  return { ok: false, error: { code, message, retryable: true } };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 function page(items: ContactListVm[]): ContactListPage {
@@ -155,6 +170,11 @@ describe("ListsScreen", () => {
     await user.type(screen.getByLabelText("List name"), "Customers");
     await user.click(screen.getByRole("button", { name: "Create list" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("A list with this name exists.");
+    expect(screen.getByLabelText("List name")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("List name")).toHaveAttribute(
+      "aria-describedby",
+      "create-list-error",
+    );
 
     view.rerender(
       <ListsScreen
@@ -167,6 +187,137 @@ describe("ListsScreen", () => {
     expect(screen.queryByRole("button", { name: "Create list" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit Customers" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete Customers" })).not.toBeInTheDocument();
+  });
+
+  it("associates edit duplicate errors and retires them when the payload changes", async () => {
+    const updateList = vi.fn(async () =>
+      failure<void>("A list with this name exists.", "duplicate_name"),
+    );
+    const source = listAdapter({ updateList });
+    const user = userEvent.setup();
+    render(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    await screen.findByRole("button", { name: "Customers" });
+    await user.click(screen.getByRole("button", { name: "Edit Customers" }));
+    await user.click(screen.getByRole("button", { name: "Save list" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A list with this name exists.");
+    expect(screen.getByLabelText("Edit list name")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Edit list name")).toHaveAttribute(
+      "aria-describedby",
+      "edit-list-error",
+    );
+
+    await user.type(screen.getByLabelText("Edit description"), " changed");
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Edit list name")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("keeps a failed delete target for an exact retry", async () => {
+    const deleteList = vi
+      .fn<Parameters<ListsAdapter["deleteList"]>, ReturnType<ListsAdapter["deleteList"]>>()
+      .mockResolvedValueOnce(failure<void>())
+      .mockResolvedValue(ok(undefined));
+    const source = listAdapter({ deleteList });
+    const user = userEvent.setup();
+    render(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    await screen.findByRole("button", { name: "Customers" });
+    await user.click(screen.getByRole("button", { name: "Delete Customers" }));
+    await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Try again");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry deleting list" }));
+    await waitFor(() => expect(deleteList).toHaveBeenCalledTimes(2));
+    expect(deleteList).toHaveBeenNthCalledWith(1, "list-1");
+    expect(deleteList).toHaveBeenNthCalledWith(2, "list-1");
+  });
+
+  it("renders only the latest list request and safely handles adapter rejection", async () => {
+    const slow = deferred<CrmUiResult<ContactListPage>>();
+    const listLists = vi
+      .fn<Parameters<ListsAdapter["listLists"]>, ReturnType<ListsAdapter["listLists"]>>()
+      .mockReturnValueOnce(slow.promise)
+      .mockResolvedValue(ok(page([listTwo])));
+    const user = userEvent.setup();
+    const view = render(
+      <ListsScreen
+        adapter={listAdapter({ listLists })}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    await user.type(screen.getByLabelText("Search lists"), "Prospects");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByRole("button", { name: "Prospects" })).toBeInTheDocument();
+    await act(async () => slow.resolve(ok(page([list]))));
+    expect(screen.queryByRole("button", { name: "Customers" })).not.toBeInTheDocument();
+
+    view.unmount();
+    render(
+      <ListsScreen
+        adapter={listAdapter({
+          listLists: vi.fn(async () => Promise.reject(new Error("provider secret"))),
+        })}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The operation failed unexpectedly.",
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent("provider secret");
+  });
+
+  it("retires mutation retry when capability is revoked", async () => {
+    const createList = vi.fn(async () => failure<ContactListVm>());
+    const source = listAdapter({ createList });
+    const user = userEvent.setup();
+    const view = render(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    await screen.findByRole("button", { name: "Customers" });
+    await user.type(screen.getByLabelText("List name"), "New");
+    await user.click(screen.getByRole("button", { name: "Create list" }));
+    expect(await screen.findByRole("button", { name: "Retry creating list" })).toBeInTheDocument();
+
+    view.rerender(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={{ ...capabilities, create: false }}
+        navigation={routes}
+      />,
+    );
+    view.rerender(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Retry creating list" })).not.toBeInTheDocument();
+    expect(createList).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -220,5 +371,90 @@ describe("ListDetailScreen", () => {
     await waitFor(() =>
       expect(source.removeMembers).toHaveBeenCalledWith("list-1", ["contact-1"]),
     );
+  });
+
+  it("drops stale detail/search identities and resets search selection", async () => {
+    const slowDetail = deferred<CrmUiResult<ContactListDetailVm | null>>();
+    const slowSearch = deferred<CrmUiResult<{ items: typeof contact[]; total: number; limit: number; offset: number }>>();
+    const getList = vi
+      .fn<Parameters<ListsAdapter["getList"]>, ReturnType<ListsAdapter["getList"]>>()
+      .mockReturnValueOnce(slowDetail.promise)
+      .mockResolvedValue(
+        ok({ ...listTwo, members: { items: [contactTwo], total: 1, limit: 20, offset: 0 } }),
+      );
+    const searchContacts = vi
+      .fn<Parameters<ListsAdapter["searchContacts"]>, ReturnType<ListsAdapter["searchContacts"]>>()
+      .mockReturnValueOnce(slowSearch.promise)
+      .mockResolvedValue(ok({ items: [contactTwo], total: 1, limit: 20, offset: 0 }));
+    const source = listAdapter({ getList, searchContacts });
+    const user = userEvent.setup();
+    const view = render(
+      <ListDetailScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+        listId="list-1"
+      />,
+    );
+    view.rerender(
+      <ListDetailScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+        listId="list-2"
+      />,
+    );
+    expect(await screen.findByRole("heading", { name: "Prospects" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("checkbox", { name: "Select Grace Hopper to add" }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      slowDetail.resolve(
+        ok({ ...list, members: { items: [contact], total: 1, limit: 20, offset: 0 } }),
+      );
+      slowSearch.resolve(ok({ items: [contact], total: 1, limit: 20, offset: 0 }));
+    });
+    expect(screen.queryByRole("heading", { name: "Customers" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Grace Hopper to add" }));
+    await user.type(screen.getByLabelText("Search contacts"), "new");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "Select Grace Hopper to add" })).not.toBeChecked(),
+    );
+  });
+
+  it("retries the exact member mutation and retires scoped confirmation", async () => {
+    const addMembers = vi
+      .fn<Parameters<ListsAdapter["addMembers"]>, ReturnType<ListsAdapter["addMembers"]>>()
+      .mockResolvedValueOnce(failure<{ added: number }>())
+      .mockResolvedValue(ok({ added: 1 }));
+    const source = listAdapter({ addMembers });
+    const user = userEvent.setup();
+    render(
+      <ListDetailScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+        listId="list-1"
+      />,
+    );
+    await screen.findByRole("heading", { name: "Customers" });
+    await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace to add" }));
+    await user.click(screen.getByRole("button", { name: "Add selected members" }));
+    await user.click(await screen.findByRole("button", { name: "Retry adding members" }));
+    await waitFor(() => expect(addMembers).toHaveBeenCalledTimes(2));
+    expect(addMembers).toHaveBeenNthCalledWith(2, "list-1", ["contact-1"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace for removal" }));
+    await user.click(screen.getByRole("button", { name: "Remove selected members" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace for removal" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(source.removeMembers).not.toHaveBeenCalled();
   });
 });

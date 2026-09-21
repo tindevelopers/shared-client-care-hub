@@ -41,18 +41,33 @@ function SuppressionRow({
 }: RowProps) {
   const [reason, setReason] = useState(item.reason ?? "");
   const [source, setSource] = useState(item.source);
-  const operation = useCrmOperation(`set:${item.id}:${item.contact_id}:${item.channel}:${allowed}`);
+  const input: SetSuppressionInput = {
+    contact_id: item.contact_id,
+    channel: item.channel,
+    suppressed: !item.suppressed,
+    reason: reason.trim() || null,
+    source: source.trim() || "manual",
+    metadata: item.metadata,
+  };
+  const revisionKey = JSON.stringify({
+    id: item.id,
+    updatedAt: item.updated_at,
+    reason: item.reason,
+    source: item.source,
+    suppressed: item.suppressed,
+    metadata: item.metadata,
+  });
+  const operation = useCrmOperation(
+    JSON.stringify({ operation: "set-suppression", allowed, input }),
+  );
+
+  useIsomorphicLayoutEffect(() => {
+    setReason(item.reason ?? "");
+    setSource(item.source);
+  }, [revisionKey]);
 
   async function setSuppression() {
     if (!allowed) return;
-    const input: SetSuppressionInput = {
-      contact_id: item.contact_id,
-      channel: item.channel,
-      suppressed: !item.suppressed,
-      reason: reason.trim() || null,
-      source: source.trim() || "manual",
-      metadata: item.metadata,
-    };
     await operation.start(() => adapter.setSuppression(input), onComplete);
   }
 
@@ -128,8 +143,21 @@ export function SuppressionScreen({
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const request = useRef(0);
   const queryKey = JSON.stringify(query);
+  const bulkInput = {
+    contactIds: selected,
+    channel: bulkChannel,
+    suppressed: bulkSuppressed,
+    reason: bulkReason.trim() || null,
+    source: bulkSource.trim() || "manual",
+    metadata: {},
+  };
   const bulkOperation = useCrmOperation(
-    `bulk:${queryKey}:${JSON.stringify(selected)}:${bulkChannel}:${bulkSuppressed}:${bulkReason}:${bulkSource}:${capabilities.update}:${capabilities.bulkActions}`,
+    JSON.stringify({
+      operation: "bulk-set-suppression",
+      query,
+      allowed: capabilities.update && capabilities.bulkActions,
+      input: bulkInput,
+    }),
   );
 
   const load = useCallback(async () => {
@@ -141,13 +169,17 @@ export function SuppressionScreen({
     setLoading(false);
     if (result.ok) {
       setPage(result.data);
-      const ids = new Set(result.data.items.map((item) => item.contact_id));
+      const ids = new Set(
+        result.data.items
+          .filter((item) => item.channel === bulkChannel)
+          .map((item) => item.contact_id),
+      );
       setSelected((current) => current.filter((id) => ids.has(id)));
     } else {
       setPage(null);
       setLoadError(result.error);
     }
-  }, [adapter, query]);
+  }, [adapter, bulkChannel, query]);
 
   useEffect(() => {
     void load();
@@ -163,26 +195,22 @@ export function SuppressionScreen({
     setQuery((current) => ({ ...current, search: search.trim() || undefined, offset: 0 }));
   }
 
-  function select(id: string, checked: boolean) {
-    setSelected((current) =>
-      checked
-        ? current.includes(id)
-          ? current
-          : [...current, id]
-        : current.filter((item) => item !== id),
-    );
+  function select(id: string, channel: SuppressionChannel, checked: boolean) {
+    if (!checked) {
+      setSelected((current) => current.filter((item) => item !== id));
+      return;
+    }
+    if (channel !== bulkChannel) {
+      setBulkChannel(channel);
+      setSelected([id]);
+      return;
+    }
+    setSelected((current) => (current.includes(id) ? current : [...current, id]));
   }
 
   async function bulkSet() {
     if (!capabilities.update || !capabilities.bulkActions || !selected.length) return;
-    const input = {
-      contactIds: [...selected],
-      channel: bulkChannel,
-      suppressed: bulkSuppressed,
-      reason: bulkReason.trim() || null,
-      source: bulkSource.trim() || "manual",
-      metadata: {},
-    };
+    const input = { ...bulkInput, contactIds: [...bulkInput.contactIds] };
     await bulkOperation.start(() => adapter.bulkSetSuppression(input), () => {
       setSelected([]);
       void load();
@@ -246,7 +274,10 @@ export function SuppressionScreen({
             Bulk channel
             <select
               value={bulkChannel}
-              onChange={(event) => setBulkChannel(event.target.value as SuppressionChannel)}
+              onChange={(event) => {
+                setBulkChannel(event.target.value as SuppressionChannel);
+                setSelected([]);
+              }}
             >
               {CHANNELS.map((channel) => (
                 <option key={channel} value={channel}>
@@ -320,8 +351,10 @@ export function SuppressionScreen({
                 item={item}
                 allowed={capabilities.update}
                 selectable={canBulk}
-                selected={selected.includes(item.contact_id)}
-                onSelect={(checked) => select(item.contact_id, checked)}
+                selected={
+                  item.channel === bulkChannel && selected.includes(item.contact_id)
+                }
+                onSelect={(checked) => select(item.contact_id, item.channel, checked)}
                 onComplete={() => void load()}
               />
             ))}

@@ -6,7 +6,13 @@ import { useCrmOperation } from "../contacts/useCrmOperation.js";
 import { useIsomorphicLayoutEffect } from "../contacts/useIsomorphicLayoutEffect.js";
 import type { CrmUiError } from "../core/result.js";
 import type { ListsScreenProps } from "./adapter.js";
-import type { ContactListInput, ContactListPage, ContactListVm, ListQuery } from "./types.js";
+import type {
+  ContactListInput,
+  ContactListPage,
+  ContactListPatch,
+  ContactListVm,
+  ListQuery,
+} from "./types.js";
 
 const PAGE_SIZE = 20;
 const emptyInput = (): ContactListInput => ({
@@ -16,6 +22,23 @@ const emptyInput = (): ContactListInput => ({
   kind: "list",
   definition: null,
 });
+
+function normalizeInput(input: ContactListInput): ContactListInput {
+  return {
+    ...input,
+    name: input.name.trim(),
+    description: input.description?.trim() || null,
+    color: input.color?.trim() || null,
+  };
+}
+
+function normalizePatch(input: ContactListVm): ContactListPatch {
+  return {
+    name: input.name.trim(),
+    description: input.description?.trim() || null,
+    color: input.color?.trim() || null,
+  };
+}
 
 export function ListsScreen({
   adapter,
@@ -29,15 +52,31 @@ export function ListsScreen({
   const [draft, setDraft] = useState<ContactListInput>(emptyInput);
   const [editing, setEditing] = useState<ContactListVm | null>(null);
   const [deleting, setDeleting] = useState<ContactListVm | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const request = useRef(0);
-  const createOperation = useCrmOperation(`create:${capabilities.create}`);
+  const queryKey = JSON.stringify(query);
+  const createPayload = normalizeInput(draft);
+  const editPayload = editing ? normalizePatch(editing) : null;
+  const createOperation = useCrmOperation(
+    JSON.stringify({ operation: "create", allowed: capabilities.create, input: createPayload }),
+  );
   const editOperation = useCrmOperation(
-    `edit:${editing?.id ?? ""}:${capabilities.update}`,
+    JSON.stringify({
+      operation: "edit",
+      id: editing?.id ?? null,
+      allowed: capabilities.update,
+      input: editPayload,
+    }),
   );
   const deleteOperation = useCrmOperation(
-    `delete:${deleting?.id ?? ""}:${capabilities.remove}`,
+    JSON.stringify({
+      operation: "delete",
+      query: queryKey,
+      id: deleting?.id ?? null,
+      allowed: capabilities.remove,
+    }),
   );
 
   const load = useCallback(async () => {
@@ -66,7 +105,12 @@ export function ListsScreen({
   }, [capabilities.update]);
   useIsomorphicLayoutEffect(() => {
     if (!capabilities.remove) setDeleting(null);
+    if (!capabilities.remove) setConfirmingDelete(false);
   }, [capabilities.remove]);
+  useIsomorphicLayoutEffect(() => {
+    setDeleting(null);
+    setConfirmingDelete(false);
+  }, [queryKey]);
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
@@ -75,9 +119,8 @@ export function ListsScreen({
 
   async function create(event: FormEvent) {
     event.preventDefault();
-    const name = draft.name.trim();
-    if (!name || !capabilities.create) return;
-    const input = { ...draft, name };
+    const input = createPayload;
+    if (!input.name || !capabilities.create) return;
     await createOperation.start(() => adapter.createList(input), () => {
       setDraft(emptyInput());
       void load();
@@ -88,15 +131,10 @@ export function ListsScreen({
     event.preventDefault();
     if (!editing || !capabilities.update) return;
     const target = editing;
-    const name = target.name.trim();
-    if (!name) return;
+    const patch = editPayload;
+    if (!patch?.name) return;
     await editOperation.start(
-      () =>
-        adapter.updateList(target.id, {
-          name,
-          description: target.description,
-          color: target.color,
-        }),
+      () => adapter.updateList(target.id, patch),
       () => {
         setEditing(null);
         void load();
@@ -107,8 +145,11 @@ export function ListsScreen({
   async function remove() {
     if (!deleting || !capabilities.remove) return;
     const target = deleting;
-    await deleteOperation.start(() => adapter.deleteList(target.id), () => void load());
-    setDeleting(null);
+    setConfirmingDelete(false);
+    await deleteOperation.start(() => adapter.deleteList(target.id), () => {
+      setDeleting(null);
+      void load();
+    });
   }
 
   return (
@@ -128,6 +169,10 @@ export function ListsScreen({
           <label>
             List name
             <input
+              aria-describedby={
+                createOperation.error?.code === "duplicate_name" ? "create-list-error" : undefined
+              }
+              aria-invalid={createOperation.error?.code === "duplicate_name" || undefined}
               value={draft.name}
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
               required
@@ -149,11 +194,13 @@ export function ListsScreen({
             Create list
           </button>
           {createOperation.error && (
-            <ErrorNotice
-              error={createOperation.error}
-              retryLabel="Retry creating list"
-              onRetry={createOperation.retry}
-            />
+            <div id="create-list-error">
+              <ErrorNotice
+                error={createOperation.error}
+                retryLabel="Retry creating list"
+                onRetry={createOperation.retry}
+              />
+            </div>
           )}
         </form>
       )}
@@ -177,7 +224,13 @@ export function ListsScreen({
                 </button>
               )}
               {capabilities.remove && (
-                <button type="button" onClick={() => setDeleting(item)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleting(item);
+                    setConfirmingDelete(true);
+                  }}
+                >
                   Delete {item.name}
                 </button>
               )}
@@ -192,6 +245,10 @@ export function ListsScreen({
           <label>
             Edit list name
             <input
+              aria-describedby={
+                editOperation.error?.code === "duplicate_name" ? "edit-list-error" : undefined
+              }
+              aria-invalid={editOperation.error?.code === "duplicate_name" || undefined}
               value={editing.name}
               onChange={(event) =>
                 setEditing((current) => (current ? { ...current, name: event.target.value } : null))
@@ -217,23 +274,28 @@ export function ListsScreen({
             Save list
           </button>
           {editOperation.error && (
-            <ErrorNotice
-              error={editOperation.error}
-              retryLabel="Retry updating list"
-              onRetry={editOperation.retry}
-            />
+            <div id="edit-list-error">
+              <ErrorNotice
+                error={editOperation.error}
+                retryLabel="Retry updating list"
+                onRetry={editOperation.retry}
+              />
+            </div>
           )}
         </form>
       )}
 
-      {deleting && capabilities.remove && (
+      {deleting && confirmingDelete && capabilities.remove && (
         <ConfirmDialog
           titleId="delete-list-title"
           title={`Delete ${deleting.name}?`}
           confirmLabel="Confirm delete"
           pending={deleteOperation.pending}
           onConfirm={() => void remove()}
-          onCancel={() => setDeleting(null)}
+          onCancel={() => {
+            setConfirmingDelete(false);
+            setDeleting(null);
+          }}
         />
       )}
       {capabilities.remove && deleteOperation.error && (

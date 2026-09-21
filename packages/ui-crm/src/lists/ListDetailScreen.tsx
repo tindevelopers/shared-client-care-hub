@@ -32,14 +32,24 @@ export function ListDetailScreen({
   const [searchError, setSearchError] = useState<CrmUiError | null>(null);
   const detailRequest = useRef(0);
   const searchRequest = useRef(0);
-  const selectionKey = JSON.stringify(selectedToAdd);
   const removalKey = JSON.stringify(selectedToRemove);
   const queryKey = JSON.stringify(query);
   const addOperation = useCrmOperation(
-    `add:${listId}:${queryKey}:${selectionKey}:${capabilities.update}:${capabilities.bulkActions}`,
+    JSON.stringify({
+      operation: "add-members",
+      listId,
+      query,
+      contactIds: selectedToAdd,
+      allowed: capabilities.update && capabilities.bulkActions,
+    }),
   );
   const removeOperation = useCrmOperation(
-    `remove:${listId}:${removalKey}:${capabilities.remove}:${capabilities.bulkActions}`,
+    JSON.stringify({
+      operation: "remove-members",
+      listId,
+      contactIds: selectedToRemove,
+      allowed: capabilities.remove && capabilities.bulkActions,
+    }),
   );
   const visible = list?.id === listId ? list : null;
 
@@ -63,7 +73,7 @@ export function ListDetailScreen({
     if (token !== searchRequest.current) return;
     if (result.ok) setContacts(result.data);
     else setSearchError(result.error);
-  }, [adapter, query]);
+  }, [adapter, listId, query]);
 
   useEffect(() => {
     void load();

@@ -53,14 +53,18 @@ function ok<T>(data: T): CrmUiResult<T> {
   return { ok: true, data };
 }
 
-function page(): ContactSuppressionPage {
+function failure<T = never>(message = "Try again"): CrmUiResult<T> {
+  return { ok: false, error: { code: "temporary", message, retryable: true } };
+}
+
+function page(total = 3): ContactSuppressionPage {
   return {
     items: [
       base,
       { ...base, id: "suppression-2", channel: "sms", source: "import" },
       { ...base, id: "suppression-3", channel: "whatsapp", source: "api" },
     ],
-    total: 3,
+    total,
     limit: 20,
     offset: 0,
   };
@@ -100,7 +104,7 @@ describe("SuppressionScreen", () => {
     );
   });
 
-  it("bulk updates the exact selection and leaves an empty selection inert", async () => {
+  it("binds bulk selection to one exact channel", async () => {
     const source = adapter();
     const user = userEvent.setup();
     render(<SuppressionScreen adapter={source} capabilities={capabilities} />);
@@ -111,7 +115,18 @@ describe("SuppressionScreen", () => {
     await user.click(
       screen.getByRole("checkbox", { name: "Select Ada Lovelace email" }),
     );
+    expect(screen.getByLabelText("Bulk channel")).toHaveValue("email");
+    expect(screen.getByRole("checkbox", { name: "Select Ada Lovelace email" })).toBeChecked();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace sms" }));
+    expect(screen.getByLabelText("Bulk channel")).toHaveValue("sms");
+    expect(screen.getByRole("checkbox", { name: "Select Ada Lovelace email" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Ada Lovelace sms" })).toBeChecked();
+
     await user.selectOptions(screen.getByLabelText("Bulk channel"), "whatsapp");
+    expect(screen.getByRole("checkbox", { name: "Select Ada Lovelace sms" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Set selected suppression" })).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace whatsapp" }));
     await user.type(screen.getByLabelText("Bulk reason"), "Policy");
     await user.click(screen.getByRole("button", { name: "Set selected suppression" }));
     await waitFor(() =>
@@ -156,5 +171,122 @@ describe("SuppressionScreen", () => {
     await user.click(await screen.findByRole("button", { name: "Retry setting selected suppression" }));
     await waitFor(() => expect(bulkSetSuppression).toHaveBeenCalledTimes(2));
     expect(bulkSetSuppression.mock.calls[1][0]).toEqual(bulkSetSuppression.mock.calls[0][0]);
+  });
+
+  it("filters and pages with the exact query", async () => {
+    const listSuppressions = vi.fn(async () => ok(page(45)));
+    const user = userEvent.setup();
+    render(
+      <SuppressionScreen
+        adapter={adapter({ listSuppressions })}
+        capabilities={capabilities}
+      />,
+    );
+    await screen.findByRole("cell", { name: "email" });
+    await user.selectOptions(screen.getByLabelText("Channel"), "sms");
+    await user.selectOptions(screen.getByLabelText("State"), "false");
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() =>
+      expect(listSuppressions).toHaveBeenLastCalledWith({
+        channel: "sms",
+        suppressed: false,
+        limit: 20,
+        offset: 20,
+      }),
+    );
+  });
+
+  it("retries an exact single mutation and retires retry after payload edits", async () => {
+    const setSuppression = vi
+      .fn<Parameters<SuppressionAdapter["setSuppression"]>, ReturnType<SuppressionAdapter["setSuppression"]>>()
+      .mockResolvedValueOnce(failure<void>())
+      .mockResolvedValue(ok(undefined));
+    const source = adapter({ setSuppression });
+    const user = userEvent.setup();
+    render(<SuppressionScreen adapter={source} capabilities={capabilities} />);
+    await screen.findByRole("cell", { name: "email" });
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+    const retry = await screen.findByRole("button", {
+      name: "Retry setting email suppression",
+    });
+    await user.click(retry);
+    await waitFor(() => expect(setSuppression).toHaveBeenCalledTimes(2));
+    expect(setSuppression.mock.calls[1][0]).toEqual(setSuppression.mock.calls[0][0]);
+
+    setSuppression.mockResolvedValue(failure<void>());
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+    expect(
+      await screen.findByRole("button", { name: "Retry setting email suppression" }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Reason for Ada Lovelace email"), " changed");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Retry setting email suppression" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("reconciles refreshed reason, source, state, and metadata", async () => {
+    const refreshed: ContactSuppressionVm = {
+      ...base,
+      suppressed: false,
+      reason: "Fresh reason",
+      source: "sync",
+      metadata: { revision: 2 },
+      updated_at: "2026-09-20",
+    };
+    const listSuppressions = vi
+      .fn<Parameters<SuppressionAdapter["listSuppressions"]>, ReturnType<SuppressionAdapter["listSuppressions"]>>()
+      .mockResolvedValueOnce(ok(page()))
+      .mockResolvedValue(
+        ok({ items: [refreshed], total: 1, limit: 20, offset: 0 }),
+      );
+    const setSuppression = vi.fn(async () => ok(undefined));
+    const source = adapter({ listSuppressions, setSuppression });
+    const user = userEvent.setup();
+    render(<SuppressionScreen adapter={source} capabilities={capabilities} />);
+    await screen.findByRole("cell", { name: "email" });
+    await user.clear(screen.getByLabelText("Reason for Ada Lovelace email"));
+    await user.type(screen.getByLabelText("Reason for Ada Lovelace email"), "Stale draft");
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+
+    expect(await screen.findByDisplayValue("Fresh reason")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("sync")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Suppress email" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Suppress email" }));
+    await waitFor(() => expect(setSuppression).toHaveBeenCalledTimes(2));
+    expect(setSuppression).toHaveBeenLastCalledWith({
+      contact_id: "contact-1",
+      channel: "email",
+      suppressed: true,
+      reason: "Fresh reason",
+      source: "sync",
+      metadata: { revision: 2 },
+    });
+  });
+
+  it("retires single and bulk retries when update capability is revoked", async () => {
+    const source = adapter({
+      setSuppression: vi.fn(async () => failure<void>()),
+      bulkSetSuppression: vi.fn(async () => failure<{ updated: number }>()),
+    });
+    const user = userEvent.setup();
+    const view = render(<SuppressionScreen adapter={source} capabilities={capabilities} />);
+    await screen.findByRole("cell", { name: "email" });
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+    await screen.findByRole("button", { name: "Retry setting email suppression" });
+    await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace email" }));
+    await user.click(screen.getByRole("button", { name: "Set selected suppression" }));
+    await screen.findByRole("button", { name: "Retry setting selected suppression" });
+
+    view.rerender(
+      <SuppressionScreen
+        adapter={source}
+        capabilities={{ ...capabilities, update: false }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Retry setting/ })).not.toBeInTheDocument();
+    view.rerender(<SuppressionScreen adapter={source} capabilities={capabilities} />);
+    expect(screen.queryByRole("button", { name: /Retry setting/ })).not.toBeInTheDocument();
   });
 });
