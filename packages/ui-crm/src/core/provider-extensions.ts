@@ -18,6 +18,7 @@ export interface ProviderPanelProps<TConfig extends JsonValue> {
 export interface AudienceSourceExtension<TConfig extends JsonValue = JsonValue> {
   id: string;
   label: string;
+  initialValue?: TConfig;
   Panel: ComponentType<ProviderPanelProps<TConfig>>;
   validate(value: TConfig): CrmUiResult<void>;
   serialize(value: TConfig): JsonValue;
@@ -26,6 +27,7 @@ export interface AudienceSourceExtension<TConfig extends JsonValue = JsonValue> 
 export interface CampaignChannelExtension<TConfig extends JsonValue = JsonValue> {
   id: string;
   label: string;
+  initialValue?: TConfig;
   Panel: ComponentType<ProviderPanelProps<TConfig>>;
   validate(value: TConfig): CrmUiResult<void>;
   serialize(value: TConfig): JsonValue;
