@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { CrmUiError } from "../core/result.js";
 import type { ContactsScreenProps } from "./adapter.js";
 import { BulkActionBar } from "./BulkActionBar.js";
+import { ErrorNotice } from "./ErrorNotice.js";
 import type { ContactPage, ContactQuery } from "./types.js";
 
 const PAGE_SIZE = 20;
@@ -17,26 +18,51 @@ export function ContactsScreen({
   const [search, setSearch] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [error, setError] = useState<CrmUiError | null>(null);
+  const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [loading, setLoading] = useState(true);
+  /**
+   * Identity of the in-flight list request. A response that is not the newest
+   * request is dropped, so a slow page/search result can neither overwrite a
+   * newer one nor clear its loading state.
+   */
+  const request = useRef(0);
 
   const load = useCallback(async () => {
+    const token = ++request.current;
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     const result = await adapter.listContacts(query);
-    if (result.ok) setPage(result.data);
-    else setError(result.error);
+    if (token !== request.current) return;
     setLoading(false);
+    if (result.ok) {
+      setPage(result.data);
+      // Selection is scoped to the rows this response actually returned.
+      const ids = new Set(result.data.items.map((item) => item.id));
+      setSelected((current) => current.filter((id) => ids.has(id)));
+    } else {
+      // Never keep rows from a different query on screen next to an error.
+      setPage(null);
+      setLoadError(result.error);
+    }
   }, [adapter, query]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // A new query is a new result set: nothing stays selected across it.
   useEffect(() => {
+    setSelected([]);
+  }, [query]);
+
+  useEffect(() => {
+    let active = true;
     void adapter.listTags().then((result) => {
-      if (result.ok) setTags(result.data);
+      if (active && result.ok) setTags(result.data);
     });
+    return () => {
+      active = false;
+    };
   }, [adapter]);
 
   function submitSearch(event: FormEvent) {
@@ -107,6 +133,7 @@ export function ContactsScreen({
           adapter={adapter}
           selectedIds={selected}
           canRemove={capabilities.remove}
+          canTag={capabilities.update}
           onComplete={() => {
             setSelected([]);
             void load();
@@ -115,18 +142,15 @@ export function ContactsScreen({
       )}
 
       {loading && <p role="status">Loading contacts…</p>}
-      {error && (
-        <div role="alert">
-          <p>{error.message}</p>
-          {error.retryable && (
-            <button type="button" onClick={() => void load()}>
-              Retry
-            </button>
-          )}
-        </div>
+      {loadError && (
+        <ErrorNotice
+          error={loadError}
+          retryLabel="Retry loading contacts"
+          onRetry={() => void load()}
+        />
       )}
-      {!loading && !error && page?.items.length === 0 && <p>No contacts found.</p>}
-      {!loading && !error && page && page.items.length > 0 && (
+      {!loading && !loadError && page?.items.length === 0 && <p>No contacts found.</p>}
+      {!loading && !loadError && page && page.items.length > 0 && (
         <table>
           <thead>
             <tr>

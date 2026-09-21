@@ -1,11 +1,18 @@
 import { useState } from "react";
-import type { CrmUiError } from "../core/result.js";
 import type { ContactsAdapter } from "./adapter.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
+import { ErrorNotice } from "./ErrorNotice.js";
+import { useCrmOperation } from "./useCrmOperation.js";
 
 export interface BulkActionBarProps {
   adapter: ContactsAdapter;
   selectedIds: string[];
   canRemove: boolean;
+  /**
+   * Tag writes are contact updates. Fail closed: a host that does not pass the
+   * update capability gets no tag controls.
+   */
+  canTag?: boolean;
   onComplete(): void;
 }
 
@@ -13,63 +20,87 @@ export function BulkActionBar({
   adapter,
   selectedIds,
   canRemove,
+  canTag = false,
   onComplete,
 }: BulkActionBarProps) {
   const [tag, setTag] = useState("");
-  const [error, setError] = useState<CrmUiError | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-  async function remove() {
-    const result = await adapter.bulkDeleteContacts(selectedIds);
-    if (!result.ok) setError(result.error);
-    else {
-      setConfirmingDelete(false);
-      onComplete();
-    }
-  }
+  const tagOperation = useCrmOperation();
+  const deleteOperation = useCrmOperation();
 
   async function assign() {
     const value = tag.trim();
-    if (!value) return;
-    const result = await adapter.assignTags(selectedIds, [value]);
-    if (!result.ok) setError(result.error);
-    else {
-      setTag("");
-      onComplete();
-    }
+    if (!value || !selectedIds.length) return;
+    // Snapshot the ids so a retry targets the contacts that were selected.
+    const ids = [...selectedIds];
+    await tagOperation.start(
+      () => adapter.assignTags(ids, [value]),
+      () => {
+        setTag("");
+        onComplete();
+      },
+    );
+  }
+
+  async function remove() {
+    const ids = [...selectedIds];
+    await deleteOperation.start(() => adapter.bulkDeleteContacts(ids), onComplete);
+    // Close on failure too: outside a native modal the background is inert, so
+    // the error and its retry have to be reachable.
+    setConfirmingDelete(false);
   }
 
   return (
     <section aria-label="Bulk actions">
       <span>{selectedIds.length} selected</span>
-      <label>
-        Tag selected
-        <input value={tag} onChange={(event) => setTag(event.target.value)} />
-      </label>
-      <button type="button" disabled={!selectedIds.length} onClick={assign}>
-        Assign tag
-      </button>
+      {canTag && (
+        <>
+          <label>
+            Tag selected
+            <input value={tag} onChange={(event) => setTag(event.target.value)} />
+          </label>
+          <button
+            type="button"
+            disabled={!selectedIds.length || tagOperation.pending}
+            onClick={() => void assign()}
+          >
+            Assign tag
+          </button>
+          {tagOperation.error && (
+            <ErrorNotice
+              error={tagOperation.error}
+              retryLabel="Retry assigning tag"
+              onRetry={tagOperation.retry}
+            />
+          )}
+        </>
+      )}
       {canRemove && (
         <button
           type="button"
-          disabled={!selectedIds.length}
+          disabled={!selectedIds.length || deleteOperation.pending}
           onClick={() => setConfirmingDelete(true)}
         >
           Delete selected
         </button>
       )}
-      {confirmingDelete && (
-        <dialog open aria-labelledby="bulk-delete-title">
-          <h2 id="bulk-delete-title">Delete selected contacts?</h2>
-          <button type="button" onClick={() => setConfirmingDelete(false)}>
-            Cancel
-          </button>
-          <button type="button" onClick={remove}>
-            Confirm delete
-          </button>
-        </dialog>
+      {canRemove && confirmingDelete && (
+        <ConfirmDialog
+          titleId="bulk-delete-title"
+          title="Delete selected contacts?"
+          confirmLabel="Confirm delete"
+          pending={deleteOperation.pending}
+          onConfirm={() => void remove()}
+          onCancel={() => setConfirmingDelete(false)}
+        />
       )}
-      {error && <p role="alert">{error.message}</p>}
+      {deleteOperation.error && (
+        <ErrorNotice
+          error={deleteOperation.error}
+          retryLabel="Retry deleting selected contacts"
+          onRetry={deleteOperation.retry}
+        />
+      )}
     </section>
   );
 }
