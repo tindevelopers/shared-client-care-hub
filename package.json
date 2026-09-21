@@ -7,6 +7,12 @@
   "engines": {
     "node": ">=24"
   },
+  "pnpm": {
+    "overrides": {
+      "form-data": "^2.5.6",
+      "undici": "^6.27.0"
+    }
+  },
   "scripts": {
     "changeset": "changeset",
     "lint": "eslint . --max-warnings=0",
