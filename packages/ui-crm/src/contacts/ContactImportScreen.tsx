@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { ContactImportScreenProps } from "./adapter.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { useCrmOperation } from "./useCrmOperation.js";
@@ -32,8 +32,14 @@ type CanonicalValue =
   | readonly CanonicalValue[]
   | { readonly [key: string]: CanonicalValue };
 
-/** Stable, type-tagged encoding: arrays stay ordered and object keys are sorted. */
-function canonicalJson(value: CanonicalValue): string {
+/**
+ * Stable, type-tagged encoding: arrays stay ordered and object keys are sorted.
+ * `undefined` is outside `JsonRow`, but an adapter can still emit one for a
+ * missing column, so it gets its own tag instead of reaching `Object.entries`
+ * and throwing during render.
+ */
+function canonicalJson(value: CanonicalValue | undefined): string {
+  if (value === undefined) return "undefined:";
   if (value === null) return "null:";
   if (typeof value === "boolean") return `boolean:${value}`;
   if (typeof value === "string") return `string:${JSON.stringify(value)}`;
@@ -77,8 +83,16 @@ export function ContactImportScreen({
   const [mapping, setMapping] = useState<ContactFieldMapping>({});
   const [previewed, setPreviewed] = useState<PreviewedImport | null>(null);
   const [complete, setComplete] = useState<ContactsImportResult | null>(null);
-  /** Snapshots that started importing and are not known current-scope failures. */
+  /** Snapshots that started importing and have no definitive typed failure. */
   const [retired, setRetired] = useState<ReadonlySet<string>>(() => new Set());
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // The preview belongs to the current rows+mapping, the commit to the previewed
   // snapshot, and all three to the import capability. Changing any of them
@@ -95,20 +109,6 @@ export function ContactImportScreen({
   );
   const committing = commitOperation.pending;
   const alreadyImported = previewed ? retired.has(previewed.fingerprint) : false;
-
-  // Only a failure delivered to this still-current commit scope proves that a
-  // reservation is safe to release. Stale success or failure is uncertain and
-  // deliberately leaves the snapshot retired.
-  useEffect(() => {
-    if (!commitOperation.error || !previewed) return;
-    const fingerprint = previewed.fingerprint;
-    setRetired((current) => {
-      if (!current.has(fingerprint)) return current;
-      const next = new Set(current);
-      next.delete(fingerprint);
-      return next;
-    });
-  }, [commitOperation.error, previewed]);
 
   async function parse(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -153,7 +153,21 @@ export function ContactImportScreen({
     const { rows, mapping: previewedMapping, fingerprint } = previewed;
     setRetired((current) => new Set(current).add(fingerprint));
     await commitOperation.start(
-      () => adapter.importContacts({ rows, mapping: previewedMapping }),
+      async () => {
+        // Inspect the adapter's own result before the operation hook suppresses
+        // stale UI callbacks. A typed failure proves nothing was imported;
+        // a rejection is converted by the hook and remains outcome-uncertain.
+        const result = await adapter.importContacts({ rows, mapping: previewedMapping });
+        if (!result.ok && mounted.current) {
+          setRetired((current) => {
+            if (!current.has(fingerprint)) return current;
+            const next = new Set(current);
+            next.delete(fingerprint);
+            return next;
+          });
+        }
+        return result;
+      },
       (result) => {
         setComplete(result);
       },
@@ -242,7 +256,10 @@ export function ContactImportScreen({
               ))}
             </ul>
           )}
-          {alreadyImported && !complete && <p>This file and mapping were already imported.</p>}
+          {/* A reservation for an in-flight commit is not a finished import. */}
+          {alreadyImported && !complete && !committing && (
+            <p>This file and mapping were already imported.</p>
+          )}
           <button
             type="button"
             disabled={

@@ -1988,6 +1988,71 @@ describe("operation lifecycle", () => {
       expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
     }
 
+    it("does not report the snapshot as already imported while the commit is pending", async () => {
+      const pendingCommit = deferred<CrmUiResult<ContactsImportResult>>();
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockReturnValue(pendingCommit.promise);
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(1));
+
+      // Reserved is not imported: an in-flight commit must not claim completion.
+      expect(
+        screen.queryByText("This file and mapping were already imported."),
+      ).not.toBeInTheDocument();
+
+      await act(async () => {
+        pendingCommit.resolve(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      });
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+      expect(
+        screen.queryByText("This file and mapping were already imported."),
+      ).not.toBeInTheDocument();
+    });
+
+    it("fingerprints an undefined row value without crashing the screen", async () => {
+      // `JsonRow` forbids undefined, but a host adapter can still emit one for a
+      // missing column. Identity must stay total rather than throw during render.
+      const parseImportFile = vi
+        .fn<
+          Parameters<ContactsAdapter["parseImportFile"]>,
+          ReturnType<ContactsAdapter["parseImportFile"]>
+        >()
+        .mockResolvedValue(
+          ok<ParsedImport>({
+            rows: [{ Value: undefined }] as unknown as ParsedImport["rows"],
+            columns: ["Value"],
+          }),
+        );
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ parseImportFile })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+
+      await user.upload(screen.getByLabelText<HTMLInputElement>("Contact file"), importFile());
+      expect(await screen.findByLabelText("Map Value")).toBeInTheDocument();
+      await user.selectOptions(screen.getByLabelText("Map Value"), "first_name");
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeEnabled();
+    });
+
     it("cannot recommit the same rows and mapping after reselecting the file", async () => {
       const importContacts = vi
         .fn<
@@ -2127,6 +2192,106 @@ describe("operation lifecycle", () => {
       );
       await act(async () => {
         pendingCommit.resolve(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      });
+      view.rerender(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeDisabled();
+      expect(
+        screen.getByText("This file and mapping were already imported."),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      expect(importContacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("releases a pending snapshot after a stale typed failure", async () => {
+      const pendingCommit = deferred<CrmUiResult<ContactsImportResult>>();
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockReturnValueOnce(pendingCommit.promise)
+        .mockResolvedValue(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      const source = adapter({ importContacts });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(1));
+
+      view.rerender(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, import: false }}
+          navigation={navigation()}
+        />,
+      );
+      await act(async () => {
+        pendingCommit.resolve(failure("Permission revoked", false));
+      });
+      view.rerender(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeEnabled();
+      expect(
+        screen.queryByText("This file and mapping were already imported."),
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+    });
+
+    it("keeps a pending snapshot retired when the adapter rejects after revocation", async () => {
+      let rejectCommit!: (reason: Error) => void;
+      const pendingCommit = new Promise<CrmUiResult<ContactsImportResult>>((_resolve, reject) => {
+        rejectCommit = reject;
+      });
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockReturnValue(pendingCommit);
+      const source = adapter({ importContacts });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(1));
+
+      view.rerender(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, import: false }}
+          navigation={navigation()}
+        />,
+      );
+      await act(async () => {
+        rejectCommit(new Error("connection lost"));
+        await pendingCommit.catch(() => undefined);
       });
       view.rerender(
         <ContactImportScreen
