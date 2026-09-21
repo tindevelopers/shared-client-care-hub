@@ -2055,6 +2055,128 @@ describe("operation lifecycle", () => {
       });
     });
 
+    it.each([
+      ["null and NaN", null, Number.NaN],
+      ["positive and negative infinity", Infinity, -Infinity],
+      ["zero and negative zero", 0, -0],
+    ])("does not collide snapshots containing %s", async (_label, first, second) => {
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockResolvedValue(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      const parseImportFile = vi
+        .fn<
+          Parameters<ContactsAdapter["parseImportFile"]>,
+          ReturnType<ContactsAdapter["parseImportFile"]>
+        >()
+        .mockResolvedValueOnce(ok({ rows: [{ Value: first }], columns: ["Value"] }))
+        .mockResolvedValue(ok({ rows: [{ Value: second }], columns: ["Value"] }));
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts, parseImportFile })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await user.upload(
+          screen.getByLabelText<HTMLInputElement>("Contact file"),
+          importFile(),
+        );
+        await screen.findByLabelText("Map Value");
+        await user.selectOptions(screen.getByLabelText("Map Value"), "first_name");
+        await user.click(screen.getByRole("button", { name: "Preview import" }));
+        expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Import contacts" })).toBeEnabled();
+        await user.click(screen.getByRole("button", { name: "Import contacts" }));
+        await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(attempt + 1));
+      }
+    });
+
+    it("keeps a pending snapshot retired across capability revocation and stale success", async () => {
+      const pendingCommit = deferred<CrmUiResult<ContactsImportResult>>();
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockReturnValue(pendingCommit.promise);
+      const source = adapter({ importContacts });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(1));
+
+      view.rerender(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, import: false }}
+          navigation={navigation()}
+        />,
+      );
+      await act(async () => {
+        pendingCommit.resolve(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      });
+      view.rerender(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeDisabled();
+      expect(
+        screen.getByText("This file and mapping were already imported."),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      expect(importContacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("releases a current failed snapshot even after changing away and back", async () => {
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockResolvedValueOnce(failure("Try again", true))
+        .mockResolvedValue(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      expect(
+        await screen.findByRole("button", { name: "Retry importing contacts" }),
+      ).toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText("Map Email"), "ignore");
+      await user.selectOptions(screen.getByLabelText("Map Email"), "email");
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeEnabled();
+
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+    });
+
     it("retires import retries when the import capability is revoked", async () => {
       const importContacts = vi
         .fn<

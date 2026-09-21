@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import type { ContactImportScreenProps } from "./adapter.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { useCrmOperation } from "./useCrmOperation.js";
@@ -24,17 +24,30 @@ const FIELDS: Array<{ value: MappedField; label: string }> = [
   { value: "notes", label: "Notes" },
 ];
 
-/** Stable JSON: arrays keep their order, object keys are sorted. */
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const entries = Object.keys(record)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`);
-    return `{${entries.join(",")}}`;
+type CanonicalValue =
+  | null
+  | boolean
+  | string
+  | number
+  | readonly CanonicalValue[]
+  | { readonly [key: string]: CanonicalValue };
+
+/** Stable, type-tagged encoding: arrays stay ordered and object keys are sorted. */
+function canonicalJson(value: CanonicalValue): string {
+  if (value === null) return "null:";
+  if (typeof value === "boolean") return `boolean:${value}`;
+  if (typeof value === "string") return `string:${JSON.stringify(value)}`;
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) return "nan:";
+    if (value === Infinity) return "inf:+";
+    if (value === -Infinity) return "inf:-";
+    return `number:${Object.is(value, -0) ? "-0" : String(value)}`;
   }
-  return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `array:[${value.map(canonicalJson).join(",")}]`;
+  const entries = Object.entries(value)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, entry]) => `${canonicalJson(key)}:${canonicalJson(entry)}`);
+  return `object:{${entries.join(",")}}`;
 }
 
 /**
@@ -64,8 +77,8 @@ export function ContactImportScreen({
   const [mapping, setMapping] = useState<ContactFieldMapping>({});
   const [previewed, setPreviewed] = useState<PreviewedImport | null>(null);
   const [complete, setComplete] = useState<ContactsImportResult | null>(null);
-  /** Snapshots that already imported successfully, keyed by their own data. */
-  const [imported, setImported] = useState<ReadonlySet<string>>(() => new Set());
+  /** Snapshots that started importing and are not known current-scope failures. */
+  const [retired, setRetired] = useState<ReadonlySet<string>>(() => new Set());
 
   // The preview belongs to the current rows+mapping, the commit to the previewed
   // snapshot, and all three to the import capability. Changing any of them
@@ -81,7 +94,21 @@ export function ContactImportScreen({
     `commit:${capabilities.import}:${previewed?.fingerprint ?? ""}`,
   );
   const committing = commitOperation.pending;
-  const alreadyImported = previewed ? imported.has(previewed.fingerprint) : false;
+  const alreadyImported = previewed ? retired.has(previewed.fingerprint) : false;
+
+  // Only a failure delivered to this still-current commit scope proves that a
+  // reservation is safe to release. Stale success or failure is uncertain and
+  // deliberately leaves the snapshot retired.
+  useEffect(() => {
+    if (!commitOperation.error || !previewed) return;
+    const fingerprint = previewed.fingerprint;
+    setRetired((current) => {
+      if (!current.has(fingerprint)) return current;
+      const next = new Set(current);
+      next.delete(fingerprint);
+      return next;
+    });
+  }, [commitOperation.error, previewed]);
 
   async function parse(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -120,15 +147,15 @@ export function ContactImportScreen({
   }
 
   async function commit() {
-    // A successful snapshot is never importable twice, and a failure leaves
-    // `complete` null so exactly that snapshot can be retried.
-    if (!previewed || complete || imported.has(previewed.fingerprint)) return;
+    // Reserve before awaiting the adapter. Scope changes cannot make a pending
+    // or uncertain snapshot importable again.
+    if (!previewed || complete || retired.has(previewed.fingerprint)) return;
     const { rows, mapping: previewedMapping, fingerprint } = previewed;
+    setRetired((current) => new Set(current).add(fingerprint));
     await commitOperation.start(
       () => adapter.importContacts({ rows, mapping: previewedMapping }),
       (result) => {
         setComplete(result);
-        setImported((current) => new Set(current).add(fingerprint));
       },
     );
   }
@@ -231,7 +258,7 @@ export function ContactImportScreen({
         <ErrorNotice
           error={commitOperation.error}
           retryLabel="Retry importing contacts"
-          onRetry={commitOperation.retry}
+          onRetry={() => void commit()}
         />
       )}
       {complete && (
