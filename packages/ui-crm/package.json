@@ -1,6 +1,6 @@
 {
   "name": "@tindevelopers/ui-crm",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0-rc.1",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -51,7 +51,7 @@
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@tindevelopers/schema-crm": "^1.1.0-rc.0",
+    "@tindevelopers/schema-crm": "^1.1.0-rc.1",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.6.0"
   }
