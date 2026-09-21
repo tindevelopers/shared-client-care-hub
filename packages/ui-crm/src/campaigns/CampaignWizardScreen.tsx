@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { CampaignType } from "@tindevelopers/schema-crm";
 import { safeAdapterCall } from "../contacts/adapterError.js";
 import { ErrorNotice } from "../contacts/ErrorNotice.js";
@@ -40,6 +40,9 @@ function toDateTimeLocal(value: string | null): string {
 }
 
 function validTimezone(value: string): boolean {
+  if (value !== "UTC" && !/^[A-Za-z_]+\/[A-Za-z0-9_+\-/]+$/.test(value)) {
+    return false;
+  }
   try {
     new Intl.DateTimeFormat("en", { timeZone: value }).format();
     return true;
@@ -102,6 +105,12 @@ export function CampaignWizardScreen({
   const [scheduleEndDirty, setScheduleEndDirty] = useState(false);
   const [callingWindowStart, setCallingWindowStart] = useState("");
   const [callingWindowEnd, setCallingWindowEnd] = useState("");
+  const [originalCallingWindowStart, setOriginalCallingWindowStart] =
+    useState<string | null>(null);
+  const [originalCallingWindowEnd, setOriginalCallingWindowEnd] =
+    useState<string | null>(null);
+  const [callingWindowStartDirty, setCallingWindowStartDirty] = useState(false);
+  const [callingWindowEndDirty, setCallingWindowEndDirty] = useState(false);
   const [callingDays, setCallingDays] = useState("");
   const [timezone, setTimezone] = useState("");
   const [messageTemplate, setMessageTemplate] = useState("");
@@ -127,15 +136,31 @@ export function CampaignWizardScreen({
   const request = useRef(0);
   const previewRequest = useRef(0);
   const writeLock = useRef(false);
-  const ownerRef = useRef(owner);
-  const audienceSelectionRef = useRef("");
-  const channelSelectionRef = useRef("");
+  const writeGeneration = useRef(0);
   const allowed = campaignId ? capabilities.update : capabilities.create;
   const ready =
     committedOwner === owner &&
     (!campaignId || loadedCampaignId === campaignId);
   const audienceExtension = audienceExtensions.find(({ id }) => id === audienceExtensionId);
   const channelExtension = channelExtensions.find(({ id }) => id === channelExtensionId);
+  const audiencePanelToken = useMemo(
+    () => audienceExtension ? {} : null,
+    [owner, audienceExtension],
+  );
+  const channelPanelToken = useMemo(
+    () => channelExtension ? {} : null,
+    [owner, channelExtension],
+  );
+  const audiencePanelOwner = useRef({
+    owner,
+    definition: audienceExtension,
+    token: audiencePanelToken,
+  });
+  const channelPanelOwner = useRef({
+    owner,
+    definition: channelExtension,
+    token: channelPanelToken,
+  });
 
   const audience: CampaignAudience =
     audienceType === "list" ? { type: "list", listId: listId.trim() } :
@@ -190,6 +215,10 @@ export function CampaignWizardScreen({
       setScheduleEndDirty(false);
       setCallingWindowStart(result.data.calling_window_start?.slice(0, 5) ?? "");
       setCallingWindowEnd(result.data.calling_window_end?.slice(0, 5) ?? "");
+      setOriginalCallingWindowStart(result.data.calling_window_start);
+      setOriginalCallingWindowEnd(result.data.calling_window_end);
+      setCallingWindowStartDirty(false);
+      setCallingWindowEndDirty(false);
       setCallingDays(result.data.calling_days?.join(", ") ?? "");
       setTimezone(result.data.timezone ?? "");
       setMessageTemplate(result.data.message_template ?? "");
@@ -215,11 +244,27 @@ export function CampaignWizardScreen({
     }
   }, [channelExtensionId, channelExtensions]);
   useIsomorphicLayoutEffect(() => {
-    ownerRef.current = owner;
-    audienceSelectionRef.current = audienceExtensionId;
-    channelSelectionRef.current = channelExtensionId;
-  }, [owner, audienceExtensionId, channelExtensionId]);
+    audiencePanelOwner.current = {
+      owner,
+      definition: audienceExtension,
+      token: audiencePanelToken,
+    };
+    channelPanelOwner.current = {
+      owner,
+      definition: channelExtension,
+      token: channelPanelToken,
+    };
+  }, [
+    owner,
+    audienceExtension,
+    audiencePanelToken,
+    channelExtension,
+    channelPanelToken,
+  ]);
   useIsomorphicLayoutEffect(() => {
+    writeGeneration.current += 1;
+    writeLock.current = false;
+    setWriteLocked(false);
     setCommittedOwner(owner);
     setName("");
     setDescription("");
@@ -232,6 +277,10 @@ export function CampaignWizardScreen({
     setScheduleEndDirty(false);
     setCallingWindowStart("");
     setCallingWindowEnd("");
+    setOriginalCallingWindowStart(null);
+    setOriginalCallingWindowEnd(null);
+    setCallingWindowStartDirty(false);
+    setCallingWindowEndDirty(false);
     setCallingDays("");
     setTimezone("");
     setMessageTemplate("");
@@ -362,8 +411,12 @@ export function CampaignWizardScreen({
       schedule_end: campaignId && !scheduleEndDirty
         ? originalScheduleEnd
         : endDate?.toISOString() ?? null,
-      calling_window_start: callingWindowStart.trim() || null,
-      calling_window_end: callingWindowEnd.trim() || null,
+      calling_window_start: campaignId && !callingWindowStartDirty
+        ? originalCallingWindowStart
+        : callingWindowStart.trim() || null,
+      calling_window_end: campaignId && !callingWindowEndDirty
+        ? originalCallingWindowEnd
+        : callingWindowEnd.trim() || null,
       calling_days: parsedDays,
       timezone: timezone.trim() || null,
       message_template: messageTemplate.trim() || null,
@@ -394,25 +447,31 @@ export function CampaignWizardScreen({
       return { ok: true, data: { id: targetId } };
     };
 
+    const generation = writeGeneration.current;
     writeLock.current = true;
     setWriteLocked(true);
     try {
       await operation.start(save, ({ id }) => navigation.campaign(id));
     } finally {
-      writeLock.current = false;
-      setWriteLocked(false);
+      if (writeGeneration.current === generation) {
+        writeLock.current = false;
+        setWriteLocked(false);
+      }
     }
   }
 
   async function retry() {
     if (writeLock.current) return;
+    const generation = writeGeneration.current;
     writeLock.current = true;
     setWriteLocked(true);
     try {
       await operation.retry();
     } finally {
-      writeLock.current = false;
-      setWriteLocked(false);
+      if (writeGeneration.current === generation) {
+        writeLock.current = false;
+        setWriteLocked(false);
+      }
     }
   }
 
@@ -473,7 +532,10 @@ export function CampaignWizardScreen({
             aria-describedby={
               fieldErrors.callingWindowStart ? "calling-window-start-error" : undefined
             }
-            onChange={(event) => setCallingWindowStart(event.target.value)} />
+            onChange={(event) => {
+              setCallingWindowStart(event.target.value);
+              setCallingWindowStartDirty(true);
+            }} />
         </label>
         {fieldErrors.callingWindowStart &&
           <p id="calling-window-start-error" role="alert">
@@ -486,7 +548,10 @@ export function CampaignWizardScreen({
             aria-describedby={
               fieldErrors.callingWindowEnd ? "calling-window-end-error" : undefined
             }
-            onChange={(event) => setCallingWindowEnd(event.target.value)} />
+            onChange={(event) => {
+              setCallingWindowEnd(event.target.value);
+              setCallingWindowEndDirty(true);
+            }} />
         </label>
         {fieldErrors.callingWindowEnd &&
           <p id="calling-window-end-error" role="alert">{fieldErrors.callingWindowEnd}</p>}
@@ -597,8 +662,9 @@ export function CampaignWizardScreen({
               onChange={(value) => {
                 if (
                   writeLock.current ||
-                  ownerRef.current !== owner ||
-                  audienceSelectionRef.current !== audienceExtension.id
+                  audiencePanelOwner.current.owner !== owner ||
+                  audiencePanelOwner.current.definition !== audienceExtension ||
+                  audiencePanelOwner.current.token !== audiencePanelToken
                 ) return;
                 setAudienceConfigs((current) => ({
                   ...current, [audienceExtension.id]: value,
@@ -632,8 +698,9 @@ export function CampaignWizardScreen({
               onChange={(value) => {
                 if (
                   writeLock.current ||
-                  ownerRef.current !== owner ||
-                  channelSelectionRef.current !== channelExtension.id
+                  channelPanelOwner.current.owner !== owner ||
+                  channelPanelOwner.current.definition !== channelExtension ||
+                  channelPanelOwner.current.token !== channelPanelToken
                 ) return;
                 setChannelConfigs((current) => ({
                   ...current, [channelExtension.id]: value,

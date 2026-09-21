@@ -312,7 +312,11 @@ describe("CampaignWizardScreen", () => {
     const originalStart = "2026-10-01T09:00:00+05:00";
     const source = adapter({
       getCampaign: vi.fn(async () => ok({
-        ...detail, schedule_start: originalStart, settings: { providerSecret: "opaque" },
+        ...detail,
+        schedule_start: originalStart,
+        calling_window_start: "09:00:30",
+        calling_window_end: "17:00:45",
+        settings: { providerSecret: "opaque" },
       })),
     });
     const user = userEvent.setup();
@@ -326,7 +330,30 @@ describe("CampaignWizardScreen", () => {
     const patch = vi.mocked(source.updateCampaign).mock.calls[0]?.[1];
     expect(patch).not.toHaveProperty("settings");
     expect(patch?.schedule_start).toBe(originalStart);
+    expect(patch?.calling_window_start).toBe("09:00:30");
+    expect(patch?.calling_window_end).toBe("17:00:45");
     expect(source.replaceAudience).not.toHaveBeenCalled();
+  });
+
+  it("sends changed calling-window minutes while preserving the untouched peer", async () => {
+    const source = adapter({
+      getCampaign: vi.fn(async () => ok({
+        ...detail,
+        calling_window_start: "09:00:30",
+        calling_window_end: "17:00:45",
+      })),
+    });
+    const user = userEvent.setup();
+    render(<CampaignWizardScreen campaignId="campaign-1" adapter={source}
+      capabilities={capabilities} navigation={navigation} />);
+    await screen.findByDisplayValue("09:00");
+    await user.clear(screen.getByLabelText("Calling window start"));
+    await user.type(screen.getByLabelText("Calling window start"), "10:15");
+    await user.click(screen.getByRole("button", { name: "Save campaign" }));
+    await waitFor(() => expect(source.updateCampaign).toHaveBeenCalled());
+    const patch = vi.mocked(source.updateCampaign).mock.calls[0]?.[1];
+    expect(patch?.calling_window_start).toBe("10:15");
+    expect(patch?.calling_window_end).toBe("17:00:45");
   });
 
   it("renders and normalizes every canonical input field", async () => {
@@ -375,6 +402,20 @@ describe("CampaignWizardScreen", () => {
       label: "timezone",
       fill: async (user: ReturnType<typeof userEvent.setup>) => {
         await user.type(screen.getByLabelText("Timezone"), "Mars/Olympus");
+      },
+      message: "Enter a valid IANA timezone.",
+    },
+    {
+      label: "positive numeric timezone offset",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Timezone"), "+01:00");
+      },
+      message: "Enter a valid IANA timezone.",
+    },
+    {
+      label: "negative numeric timezone offset",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Timezone"), "-05:00");
       },
       message: "Enter a valid IANA timezone.",
     },
@@ -548,13 +589,118 @@ describe("CampaignWizardScreen", () => {
     rerender(<CampaignWizardScreen campaignId="campaign-b"
       adapter={source} capabilities={capabilities} navigation={navigation}
       channelExtensions={[extension]} />);
-    const name = await screen.findByDisplayValue("Campaign B");
+    await screen.findByDisplayValue("Campaign B");
+    rerender(<CampaignWizardScreen campaignId="campaign-a"
+      adapter={source} capabilities={capabilities} navigation={navigation}
+      channelExtensions={[extension]} />);
+    const name = await screen.findByDisplayValue("Campaign A");
     act(() => staleChange?.({ token: "stale" }));
     await user.clear(name);
-    await user.type(name, "Campaign B renamed");
+    await user.type(name, "Campaign A renamed");
     await user.click(screen.getByRole("button", { name: "Save campaign" }));
     await waitFor(() => expect(source.updateCampaign).toHaveBeenCalled());
     expect(vi.mocked(source.updateCampaign).mock.calls.at(-1)?.[1]).not.toHaveProperty("settings");
+  });
+
+  it("rejects stale callbacks after extension selection ABA", async () => {
+    const callbacks: Array<(value: JsonValue) => void> = [];
+    function Panel({ onChange }: {
+      value: JsonValue; disabled: boolean; onChange(value: JsonValue): void;
+    }) {
+      callbacks.push(onChange);
+      return <p>Selection panel</p>;
+    }
+    const one = defineCampaignChannelExtension({
+      id: "one", label: "One", initialValue: { token: "one" },
+      Panel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    const two = defineCampaignChannelExtension({
+      id: "two", label: "Two", initialValue: { token: "two" },
+      Panel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    const source = adapter();
+    const user = userEvent.setup();
+    render(<CampaignWizardScreen adapter={source} capabilities={capabilities}
+      navigation={navigation} channelExtensions={[one, two]} />);
+    await user.type(screen.getByLabelText("Campaign name"), "ABA");
+    await user.selectOptions(screen.getByLabelText("Channel configuration"), "one");
+    const stale = callbacks.at(-1);
+    await user.selectOptions(screen.getByLabelText("Channel configuration"), "two");
+    await user.selectOptions(screen.getByLabelText("Channel configuration"), "one");
+    act(() => stale?.({ token: "stale" }));
+    await user.click(screen.getByRole("button", { name: "Create campaign" }));
+    await waitFor(() => expect(source.createCampaign).toHaveBeenCalled());
+    expect(vi.mocked(source.createCampaign).mock.calls[0]?.[0].settings).toEqual({
+      channelExtension: { id: "one", config: { token: "one" } },
+    });
+  });
+
+  it("rejects stale callbacks after same-owner implementation replacement", async () => {
+    let stale: ((value: JsonValue) => void) | undefined;
+    function OldPanel({ onChange }: {
+      value: JsonValue; disabled: boolean; onChange(value: JsonValue): void;
+    }) {
+      stale = onChange;
+      return <p>Old</p>;
+    }
+    function NewPanel() {
+      return <p>New</p>;
+    }
+    const oldDefinition = defineCampaignChannelExtension({
+      id: "same", label: "Same", initialValue: { version: "old" },
+      Panel: OldPanel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    const newDefinition = defineCampaignChannelExtension({
+      id: "same", label: "Same", initialValue: { version: "new" },
+      Panel: NewPanel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    const source = adapter();
+    const user = userEvent.setup();
+    const { rerender } = render(<CampaignWizardScreen adapter={source}
+      capabilities={capabilities} navigation={navigation}
+      channelExtensions={[oldDefinition]} />);
+    await user.type(screen.getByLabelText("Campaign name"), "Replacement");
+    await user.selectOptions(screen.getByLabelText("Channel configuration"), "same");
+    rerender(<CampaignWizardScreen adapter={source}
+      capabilities={capabilities} navigation={navigation}
+      channelExtensions={[newDefinition]} />);
+    act(() => stale?.({ version: "stale" }));
+    await user.click(screen.getByRole("button", { name: "Create campaign" }));
+    await waitFor(() => expect(source.createCampaign).toHaveBeenCalled());
+    expect(vi.mocked(source.createCampaign).mock.calls[0]?.[0].settings).toEqual({
+      channelExtension: { id: "same", config: { version: "new" } },
+    });
+  });
+
+  it("retires old-owner write locks and settlements", async () => {
+    vi.mocked(navigation.campaign).mockClear();
+    const update = deferred<CrmUiResult<void>>();
+    const create = deferred<CrmUiResult<{ id: string }>>();
+    const source = adapter({
+      updateCampaign: vi.fn(() => update.promise),
+      createCampaign: vi.fn(() => create.promise),
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(<CampaignWizardScreen campaignId="campaign-a"
+      adapter={source} capabilities={capabilities} navigation={navigation} />);
+    const editName = await screen.findByLabelText("Campaign name");
+    await user.clear(editName);
+    await user.type(editName, "Pending A");
+    await user.click(screen.getByRole("button", { name: "Save campaign" }));
+    rerender(<CampaignWizardScreen adapter={source} capabilities={capabilities}
+      navigation={navigation} />);
+    const createName = screen.getByLabelText("Campaign name");
+    expect(screen.getByRole("button", { name: "Create campaign" })).toBeEnabled();
+    await user.type(createName, "Owner B");
+    await user.click(screen.getByRole("button", { name: "Create campaign" }));
+    expect(source.createCampaign).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Create campaign" })).toBeDisabled();
+    await act(async () => update.resolve(ok(undefined)));
+    expect(screen.getByRole("button", { name: "Create campaign" })).toBeDisabled();
+    expect(navigation.campaign).not.toHaveBeenCalledWith("campaign-a");
+    await act(async () => create.resolve(ok({ id: "campaign-b" })));
+    expect(screen.getByRole("button", { name: "Create campaign" })).toBeEnabled();
+    expect(navigation.campaign).toHaveBeenCalledWith("campaign-b");
   });
 
   it("retries the exact edit mutation and clears retry when update is revoked", async () => {
