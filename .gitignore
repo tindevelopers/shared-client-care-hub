@@ -8,3 +8,4 @@ dist
 .pnpm-store/
 **/.pnpm-store/
 next-env.d.ts
+graphify-out/
