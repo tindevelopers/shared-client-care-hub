@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CrmUiError, CrmUiResult } from "../core/result.js";
+import { safeAdapterCall } from "./adapterError.js";
+import { useIsomorphicLayoutEffect } from "./useIsomorphicLayoutEffect.js";
 
 /**
  * Identity of the context an operation belongs to: a contact id, a selected-id
@@ -18,8 +20,10 @@ export type OperationScope = string;
  * an attempt is in flight, and callers disable their control with it.
  *
  * `scope` keeps that state from outliving its context: a settlement arriving
- * after a scope change or after unmount neither invokes `onSuccess` nor sets
- * state, so contact A can never mutate, render for, or navigate from B.
+ * after a committed scope change or after unmount neither invokes `onSuccess`
+ * nor sets state, so contact A can never mutate, render for, or navigate from B.
+ * Adapter throws become a stable non-retryable error, so an operation can never
+ * stay pending forever or reject unhandled.
  */
 export interface CrmOperation {
   pending: boolean;
@@ -34,22 +38,25 @@ export interface CrmOperation {
 export function useCrmOperation(scope?: OperationScope): CrmOperation {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<CrmUiError | null>(null);
-  const [trackedScope, setTrackedScope] = useState(scope);
   const lastAttempt = useRef<(() => Promise<void>) | null>(null);
   const inFlight = useRef(false);
-  /** Bumped by every scope change and by unmount. */
+  /** Bumped by every committed scope change and by unmount. */
   const generation = useRef(0);
+  const trackedScope = useRef(scope);
 
-  // Reset during render, not in an effect: an effect would leave a window in
-  // which a stale settlement could still land on the new context.
-  if (trackedScope !== scope) {
-    setTrackedScope(scope);
+  // Retire the previous context once the new one has committed — in a layout
+  // effect, never during render. Layout effects run before paint and in the
+  // same task as the commit, so a stale settlement cannot be delivered to the
+  // new context first.
+  useIsomorphicLayoutEffect(() => {
+    if (trackedScope.current === scope) return;
+    trackedScope.current = scope;
     generation.current += 1;
     lastAttempt.current = null;
     inFlight.current = false;
     setPending(false);
     setError(null);
-  }
+  }, [scope]);
 
   // After unmount nothing may be called back or set: invalidate in-flight work.
   useEffect(
@@ -74,14 +81,11 @@ export function useCrmOperation(scope?: OperationScope): CrmOperation {
         inFlight.current = true;
         setPending(true);
         setError(null);
-        let result: CrmUiResult<T>;
-        try {
-          result = await operation();
-        } finally {
-          if (generation.current === startedAt) inFlight.current = false;
-        }
-        // Stale settlement: no callback, no state.
+        const result = await safeAdapterCall(operation);
+        // A stale settlement is inert: no callback, no state, and it must not
+        // release the double-submit guard of the attempt that replaced it.
         if (generation.current !== startedAt) return;
+        inFlight.current = false;
         setPending(false);
         if (result.ok) {
           succeeded = true;

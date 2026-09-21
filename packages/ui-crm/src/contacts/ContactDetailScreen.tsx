@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { CrmUiError } from "../core/result.js";
 import type { ContactDetailScreenProps } from "./adapter.js";
+import { safeAdapterCall } from "./adapterError.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { useCrmOperation } from "./useCrmOperation.js";
+import { useIsomorphicLayoutEffect } from "./useIsomorphicLayoutEffect.js";
 import type { ActivityVm, ContactDetailVm, NoteVm } from "./types.js";
 
 export function ContactDetailScreen({
@@ -22,8 +24,9 @@ export function ContactDetailScreen({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Scopes tie each operation to the contact and the capability it was started
   // with; a change drops its pending result, its error, and its retry.
+  const deleteScope = `delete:${contactId}:${capabilities.remove}`;
   const noteOperation = useCrmOperation(`note:${contactId}:${capabilities.update}`);
-  const deleteOperation = useCrmOperation(`delete:${contactId}:${capabilities.remove}`);
+  const deleteOperation = useCrmOperation(deleteScope);
   /** Identity of the in-flight load; superseded responses are dropped. */
   const request = useRef(0);
   // Gate on identity, not just on presence: a response for another id can never
@@ -39,9 +42,9 @@ export function ContactDetailScreen({
     setNotes([]);
     setLoadError(null);
     const [contactResult, activityResult, notesResult] = await Promise.all([
-      adapter.getContact(contactId),
-      adapter.listActivities(contactId),
-      adapter.listNotes(contactId),
+      safeAdapterCall(() => adapter.getContact(contactId)),
+      safeAdapterCall(() => adapter.listActivities(contactId)),
+      safeAdapterCall(() => adapter.listNotes(contactId)),
     ]);
     if (token !== request.current) return;
     const failure = [contactResult, activityResult, notesResult].find((result) => !result.ok);
@@ -66,11 +69,17 @@ export function ContactDetailScreen({
     };
   }, [load]);
 
-  // Another contact is another draft and another confirmation.
-  useEffect(() => {
+  // Another contact is another draft.
+  useIsomorphicLayoutEffect(() => {
     setDraft("");
-    setConfirmingDelete(false);
   }, [contactId]);
+
+  // The confirmation belongs to one contact and one capability grant: retire it
+  // on any change, so it can neither follow a new target nor resurrect when a
+  // revoked capability comes back.
+  useIsomorphicLayoutEffect(() => {
+    setConfirmingDelete(false);
+  }, [deleteScope]);
 
   async function addNote(event: FormEvent) {
     event.preventDefault();

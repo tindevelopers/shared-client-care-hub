@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useMemo, useState, type ChangeEvent } from "react";
 import type { ContactImportScreenProps } from "./adapter.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { useCrmOperation } from "./useCrmOperation.js";
@@ -24,12 +24,26 @@ const FIELDS: Array<{ value: MappedField; label: string }> = [
   { value: "notes", label: "Notes" },
 ];
 
-/** Stable mapping identity, independent of key insertion order. */
-function mappingKey(mapping: ContactFieldMapping): string {
-  return Object.keys(mapping)
-    .sort()
-    .map((column) => `${column}=${mapping[column]}`)
-    .join(",");
+/** Stable JSON: arrays keep their order, object keys are sorted. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * Snapshot identity derived from the data itself: the same rows and mapping
+ * always produce the same key, so re-selecting an already imported payload is
+ * recognized, while a genuinely different row payload is new.
+ */
+function snapshotFingerprint(rows: JsonRow[], mapping: ContactFieldMapping): string {
+  return canonicalJson({ mapping, rows });
 }
 
 /** The exact rows + mapping a preview was computed from; commit replays it. */
@@ -50,35 +64,38 @@ export function ContactImportScreen({
   const [mapping, setMapping] = useState<ContactFieldMapping>({});
   const [previewed, setPreviewed] = useState<PreviewedImport | null>(null);
   const [complete, setComplete] = useState<ContactsImportResult | null>(null);
-  /** Fingerprints of rows+mapping snapshots that already imported successfully. */
+  /** Snapshots that already imported successfully, keyed by their own data. */
   const [imported, setImported] = useState<ReadonlySet<string>>(() => new Set());
-  /** Identifies the parsed rows; a new file invalidates every snapshot built on the old ones. */
-  const [fileId, setFileId] = useState(0);
 
-  // The preview belongs to the current mapping, the commit to the previewed
-  // snapshot: changing either invalidates the pending result, its error, and
-  // its retry instead of letting it settle into the new flow.
-  const mappingFingerprint = `${fileId}|${mappingKey(mapping)}`;
-  const parseOperation = useCrmOperation();
-  const previewOperation = useCrmOperation(mappingFingerprint);
-  const commitOperation = useCrmOperation(previewed?.fingerprint ?? "");
+  // The preview belongs to the current rows+mapping, the commit to the previewed
+  // snapshot, and all three to the import capability. Changing any of them
+  // retires the pending result, its error, and its retry instead of letting it
+  // settle into the new flow.
+  const currentFingerprint = useMemo(
+    () => (parsed ? snapshotFingerprint(parsed.rows, mapping) : ""),
+    [mapping, parsed],
+  );
+  const parseOperation = useCrmOperation(`parse:${capabilities.import}`);
+  const previewOperation = useCrmOperation(`preview:${capabilities.import}:${currentFingerprint}`);
+  const commitOperation = useCrmOperation(
+    `commit:${capabilities.import}:${previewed?.fingerprint ?? ""}`,
+  );
   const committing = commitOperation.pending;
   const alreadyImported = previewed ? imported.has(previewed.fingerprint) : false;
 
   async function parse(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    // A new file invalidates every downstream step, including the record of
-    // what was already imported: those fingerprints described the old rows.
+    // A new file invalidates every downstream step. The imported record is
+    // keyed by the data itself, so it deliberately survives: the same payload
+    // can never be committed twice from this screen.
     setParsed(null);
     setMapping({});
     setPreviewed(null);
     setComplete(null);
-    setImported(new Set());
     await parseOperation.start(() => adapter.parseImportFile(file), (result) => {
       const initial: ContactFieldMapping = {};
       for (const column of result.columns) initial[column] = "ignore";
-      setFileId((current) => current + 1);
       setParsed(result);
       setMapping(initial);
     });
@@ -95,7 +112,7 @@ export function ContactImportScreen({
     if (!parsed) return;
     const rows = parsed.rows;
     const requested = mapping;
-    const fingerprint = `${fileId}|${mappingKey(requested)}`;
+    const fingerprint = snapshotFingerprint(rows, requested);
     await previewOperation.start(
       () => adapter.previewImport(rows, requested),
       (preview) => setPreviewed({ rows, mapping: requested, fingerprint, preview }),

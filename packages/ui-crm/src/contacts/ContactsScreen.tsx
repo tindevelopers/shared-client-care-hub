@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { CrmUiError } from "../core/result.js";
 import type { ContactsScreenProps } from "./adapter.js";
+import { safeAdapterCall } from "./adapterError.js";
 import { BulkActionBar } from "./BulkActionBar.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import type { ContactPage, ContactQuery } from "./types.js";
@@ -31,7 +32,7 @@ export function ContactsScreen({
     const token = ++request.current;
     setLoading(true);
     setLoadError(null);
-    const result = await adapter.listContacts(query);
+    const result = await safeAdapterCall(() => adapter.listContacts(query));
     if (token !== request.current) return;
     setLoading(false);
     if (result.ok) {
@@ -61,7 +62,7 @@ export function ContactsScreen({
 
   useEffect(() => {
     let active = true;
-    void adapter.listTags().then((result) => {
+    void safeAdapterCall(() => adapter.listTags()).then((result) => {
       if (active && result.ok) setTags(result.data);
     });
     return () => {

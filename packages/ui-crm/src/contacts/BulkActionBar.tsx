@@ -3,6 +3,7 @@ import type { ContactsAdapter } from "./adapter.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { useCrmOperation } from "./useCrmOperation.js";
+import { useIsomorphicLayoutEffect } from "./useIsomorphicLayoutEffect.js";
 
 export interface BulkActionBarProps {
   adapter: ContactsAdapter;
@@ -25,12 +26,19 @@ export function BulkActionBar({
 }: BulkActionBarProps) {
   const [tag, setTag] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // A bulk retry is only valid for the exact selected-id set and capability it
-  // failed with, so both are part of the operation scope: clearing or changing
-  // the selection, or revoking the capability, drops the error and the retry.
-  const selection = selectedIds.join(",");
+  // A bulk retry — and the confirmation itself — is only valid for the exact
+  // selected-id set and capability it was created with. JSON rather than a
+  // delimiter join, so the scope is the id set unambiguously.
+  const selection = JSON.stringify(selectedIds);
+  const deleteScope = `delete:${selection}:${canRemove}`;
   const tagOperation = useCrmOperation(`tag:${selection}:${canTag}`);
-  const deleteOperation = useCrmOperation(`delete:${selection}:${canRemove}`);
+  const deleteOperation = useCrmOperation(deleteScope);
+
+  // Retire the confirmation on any change: it must not follow a changed
+  // selection, and it must not resurrect when a revoked capability returns.
+  useIsomorphicLayoutEffect(() => {
+    setConfirmingDelete(false);
+  }, [deleteScope]);
 
   async function assign() {
     const value = tag.trim();

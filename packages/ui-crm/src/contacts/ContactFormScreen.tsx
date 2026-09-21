@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { CrmUiError } from "../core/result.js";
 import type { ContactFormScreenProps } from "./adapter.js";
+import { safeAdapterCall } from "./adapterError.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { TagInput } from "./TagInput.js";
 import { useCrmOperation } from "./useCrmOperation.js";
+import { useIsomorphicLayoutEffect } from "./useIsomorphicLayoutEffect.js";
 import type { ContactDetailVm, ContactInput } from "./types.js";
 
 const EMPTY_INPUT: ContactInput = { first_name: "", last_name: "", tags: [] };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FORM_ERROR_ID = "contact-form-error";
+
+/** The form context that owns the current input state. */
+function contextKeyOf(mode: "create" | "edit", contactId: string | undefined): string {
+  return `${mode}:${contactId ?? ""}`;
+}
 
 type InvalidFields = Partial<Record<keyof ContactInput, boolean>>;
 
@@ -67,22 +74,24 @@ export function ContactFormScreen({
   const [input, setInput] = useState<ContactInput | null>(
     mode === "create" ? EMPTY_INPUT : null,
   );
-  /** The contact id `input` was loaded from; the form stays closed until it matches. */
-  const [loadedId, setLoadedId] = useState<string | null>(null);
+  /** The context key that owns `input`; the form renders and submits only when it is current. */
+  const [formOwner, setFormOwner] = useState<string | null>(() => contextKeyOf(mode, contactId));
   const [invalid, setInvalid] = useState<InvalidFields>({});
   const [validationError, setValidationError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [companiesUnavailable, setCompaniesUnavailable] = useState(false);
+
+  const contextKey = contextKeyOf(mode, contactId);
   const allowed = mode === "create" ? capabilities.create : capabilities.update;
   // The save belongs to this exact form context — mode, target, capability — so
   // a pending save cannot settle into a different one.
-  const saveOperation = useCrmOperation(`${mode}:${contactId ?? ""}:${allowed}`);
+  const saveOperation = useCrmOperation(`${contextKey}:${allowed}`);
   /** Identity of the in-flight edit load; superseded responses are dropped. */
   const request = useRef(0);
 
   const missingId = mode === "edit" && !contactId;
-  const ready = input !== null && (mode === "create" || loadedId === contactId);
+  const ready = input !== null && formOwner === contextKey;
 
   const load = useCallback(async () => {
     if (mode !== "edit" || !contactId) return;
@@ -90,9 +99,9 @@ export function ContactFormScreen({
     // Close the form until the load that matches this id arrives, so typing can
     // never race it and a late response can never overwrite edits.
     setInput(null);
-    setLoadedId(null);
+    setFormOwner(null);
     setLoadError(null);
-    const result = await adapter.getContact(contactId);
+    const result = await safeAdapterCall(() => adapter.getContact(contactId));
     if (token !== request.current) return;
     if (!result.ok) {
       setLoadError(result.error);
@@ -103,18 +112,25 @@ export function ContactFormScreen({
       return;
     }
     setInput(toFormState(result.data));
-    setLoadedId(contactId);
-  }, [adapter, contactId, mode]);
+    setFormOwner(contextKey);
+  }, [adapter, contactId, contextKey, mode]);
 
-  // A different form context starts from a clean slate: no carried-over values,
-  // no stale readiness, validation, or load error.
-  useEffect(() => {
-    setInput(mode === "create" ? EMPTY_INPUT : null);
-    setLoadedId(null);
+  // Retire form state owned by another context once the new context has
+  // committed, and before it paints: no stale edit→create frame, and no stale
+  // values reachable from the submit handler.
+  useIsomorphicLayoutEffect(() => {
+    if (formOwner === contextKey) return;
     setInvalid({});
     setValidationError(null);
     setLoadError(null);
-  }, [mode, contactId]);
+    if (mode === "create") {
+      setInput(EMPTY_INPUT);
+      setFormOwner(contextKey);
+    } else {
+      setInput(null);
+      setFormOwner(null);
+    }
+  }, [contextKey, formOwner, mode]);
 
   useEffect(() => {
     void load();
@@ -126,7 +142,7 @@ export function ContactFormScreen({
 
   useEffect(() => {
     let active = true;
-    void adapter.listCompanyOptions().then((result) => {
+    void safeAdapterCall(() => adapter.listCompanyOptions()).then((result) => {
       if (!active) return;
       if (result.ok) setCompanies(result.data);
       else setCompaniesUnavailable(true);
@@ -195,7 +211,9 @@ export function ContactFormScreen({
           onRetry={() => void load()}
         />
       )}
-      {!missingId && !ready && !loadError && <p role="status">Loading contact…</p>}
+      {!missingId && !ready && !loadError && mode === "edit" && (
+        <p role="status">Loading contact…</p>
+      )}
       {!missingId && ready && input && (
         <>
           {validationError && (
