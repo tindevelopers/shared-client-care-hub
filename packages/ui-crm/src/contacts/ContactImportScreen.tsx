@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import type { ContactImportScreenProps } from "./adapter.js";
 import { ErrorNotice } from "./ErrorNotice.js";
 import { useCrmOperation } from "./useCrmOperation.js";
@@ -24,10 +24,19 @@ const FIELDS: Array<{ value: MappedField; label: string }> = [
   { value: "notes", label: "Notes" },
 ];
 
+/** Stable mapping identity, independent of key insertion order. */
+function mappingKey(mapping: ContactFieldMapping): string {
+  return Object.keys(mapping)
+    .sort()
+    .map((column) => `${column}=${mapping[column]}`)
+    .join(",");
+}
+
 /** The exact rows + mapping a preview was computed from; commit replays it. */
 interface PreviewedImport {
   rows: JsonRow[];
   mapping: ContactFieldMapping;
+  fingerprint: string;
   preview: ContactsImportPreview;
 }
 
@@ -41,64 +50,69 @@ export function ContactImportScreen({
   const [mapping, setMapping] = useState<ContactFieldMapping>({});
   const [previewed, setPreviewed] = useState<PreviewedImport | null>(null);
   const [complete, setComplete] = useState<ContactsImportResult | null>(null);
-  const parseOperation = useCrmOperation();
-  const previewOperation = useCrmOperation();
-  const commitOperation = useCrmOperation();
-  /**
-   * Bumped whenever the rows or the mapping change, so a preview that was in
-   * flight for an older snapshot is dropped instead of describing rows the user
-   * can no longer see.
-   */
-  const snapshot = useRef(0);
+  /** Fingerprints of rows+mapping snapshots that already imported successfully. */
+  const [imported, setImported] = useState<ReadonlySet<string>>(() => new Set());
+  /** Identifies the parsed rows; a new file invalidates every snapshot built on the old ones. */
+  const [fileId, setFileId] = useState(0);
 
-  function invalidate() {
-    snapshot.current += 1;
-    setPreviewed(null);
-    setComplete(null);
-  }
+  // The preview belongs to the current mapping, the commit to the previewed
+  // snapshot: changing either invalidates the pending result, its error, and
+  // its retry instead of letting it settle into the new flow.
+  const mappingFingerprint = `${fileId}|${mappingKey(mapping)}`;
+  const parseOperation = useCrmOperation();
+  const previewOperation = useCrmOperation(mappingFingerprint);
+  const commitOperation = useCrmOperation(previewed?.fingerprint ?? "");
+  const committing = commitOperation.pending;
+  const alreadyImported = previewed ? imported.has(previewed.fingerprint) : false;
 
   async function parse(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    // A new file invalidates every downstream step.
-    invalidate();
+    // A new file invalidates every downstream step, including the record of
+    // what was already imported: those fingerprints described the old rows.
     setParsed(null);
     setMapping({});
+    setPreviewed(null);
+    setComplete(null);
+    setImported(new Set());
     await parseOperation.start(() => adapter.parseImportFile(file), (result) => {
       const initial: ContactFieldMapping = {};
       for (const column of result.columns) initial[column] = "ignore";
+      setFileId((current) => current + 1);
       setParsed(result);
       setMapping(initial);
     });
   }
 
   function changeMapping(column: string, field: MappedField) {
-    invalidate();
+    // The preview, its result, and its commit all describe the previous mapping.
+    setPreviewed(null);
+    setComplete(null);
     setMapping((current) => ({ ...current, [column]: field }));
   }
 
   async function showPreview() {
     if (!parsed) return;
-    const token = snapshot.current;
     const rows = parsed.rows;
     const requested = mapping;
+    const fingerprint = `${fileId}|${mappingKey(requested)}`;
     await previewOperation.start(
       () => adapter.previewImport(rows, requested),
-      (preview) => {
-        if (token !== snapshot.current) return;
-        setPreviewed({ rows, mapping: requested, preview });
-      },
+      (preview) => setPreviewed({ rows, mapping: requested, fingerprint, preview }),
     );
   }
 
   async function commit() {
-    // `complete` is the guard against repeating a successful import of the same
-    // snapshot; a failure leaves it null so the commit can be retried.
-    if (!previewed || complete) return;
-    const { rows, mapping: previewedMapping } = previewed;
+    // A successful snapshot is never importable twice, and a failure leaves
+    // `complete` null so exactly that snapshot can be retried.
+    if (!previewed || complete || imported.has(previewed.fingerprint)) return;
+    const { rows, mapping: previewedMapping, fingerprint } = previewed;
     await commitOperation.start(
       () => adapter.importContacts({ rows, mapping: previewedMapping }),
-      (result) => setComplete(result),
+      (result) => {
+        setComplete(result);
+        setImported((current) => new Set(current).add(fingerprint));
+      },
     );
   }
 
@@ -122,7 +136,7 @@ export function ContactImportScreen({
         <input
           type="file"
           accept=".csv,.json"
-          disabled={parseOperation.pending}
+          disabled={parseOperation.pending || committing}
           onChange={(event) => void parse(event)}
         />
       </label>
@@ -143,6 +157,7 @@ export function ContactImportScreen({
               <select
                 aria-label={`Map ${column}`}
                 value={mapping[column] ?? "ignore"}
+                disabled={committing}
                 onChange={(event) => changeMapping(column, event.target.value as MappedField)}
               >
                 {FIELDS.map((field) => (
@@ -155,7 +170,7 @@ export function ContactImportScreen({
           ))}
           <button
             type="button"
-            disabled={previewOperation.pending}
+            disabled={previewOperation.pending || committing}
             onClick={() => void showPreview()}
           >
             Preview import
@@ -183,9 +198,12 @@ export function ContactImportScreen({
               ))}
             </ul>
           )}
+          {alreadyImported && !complete && <p>This file and mapping were already imported.</p>}
           <button
             type="button"
-            disabled={commitOperation.pending || complete !== null || previewed.preview.valid === 0}
+            disabled={
+              committing || complete !== null || alreadyImported || previewed.preview.valid === 0
+            }
             onClick={() => void commit()}
           >
             Import contacts

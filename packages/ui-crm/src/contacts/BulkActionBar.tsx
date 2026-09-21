@@ -25,8 +25,12 @@ export function BulkActionBar({
 }: BulkActionBarProps) {
   const [tag, setTag] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const tagOperation = useCrmOperation();
-  const deleteOperation = useCrmOperation();
+  // A bulk retry is only valid for the exact selected-id set and capability it
+  // failed with, so both are part of the operation scope: clearing or changing
+  // the selection, or revoking the capability, drops the error and the retry.
+  const selection = selectedIds.join(",");
+  const tagOperation = useCrmOperation(`tag:${selection}:${canTag}`);
+  const deleteOperation = useCrmOperation(`delete:${selection}:${canRemove}`);
 
   async function assign() {
     const value = tag.trim();
@@ -94,7 +98,7 @@ export function BulkActionBar({
           onCancel={() => setConfirmingDelete(false)}
         />
       )}
-      {deleteOperation.error && (
+      {canRemove && deleteOperation.error && (
         <ErrorNotice
           error={deleteOperation.error}
           retryLabel="Retry deleting selected contacts"

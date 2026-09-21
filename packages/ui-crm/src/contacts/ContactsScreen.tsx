@@ -48,6 +48,10 @@ export function ContactsScreen({
 
   useEffect(() => {
     void load();
+    return () => {
+      // Invalidate this load: an unmounted or superseded screen never applies it.
+      request.current += 1;
+    };
   }, [load]);
 
   // A new query is a new result set: nothing stays selected across it.

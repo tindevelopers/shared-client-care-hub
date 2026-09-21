@@ -74,11 +74,13 @@ export function ContactFormScreen({
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [companiesUnavailable, setCompaniesUnavailable] = useState(false);
-  const saveOperation = useCrmOperation();
+  const allowed = mode === "create" ? capabilities.create : capabilities.update;
+  // The save belongs to this exact form context — mode, target, capability — so
+  // a pending save cannot settle into a different one.
+  const saveOperation = useCrmOperation(`${mode}:${contactId ?? ""}:${allowed}`);
   /** Identity of the in-flight edit load; superseded responses are dropped. */
   const request = useRef(0);
 
-  const allowed = mode === "create" ? capabilities.create : capabilities.update;
   const missingId = mode === "edit" && !contactId;
   const ready = input !== null && (mode === "create" || loadedId === contactId);
 
@@ -104,8 +106,22 @@ export function ContactFormScreen({
     setLoadedId(contactId);
   }, [adapter, contactId, mode]);
 
+  // A different form context starts from a clean slate: no carried-over values,
+  // no stale readiness, validation, or load error.
+  useEffect(() => {
+    setInput(mode === "create" ? EMPTY_INPUT : null);
+    setLoadedId(null);
+    setInvalid({});
+    setValidationError(null);
+    setLoadError(null);
+  }, [mode, contactId]);
+
   useEffect(() => {
     void load();
+    return () => {
+      // Invalidate this load: an unmounted or superseded form never installs it.
+      request.current += 1;
+    };
   }, [load]);
 
   useEffect(() => {

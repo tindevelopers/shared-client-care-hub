@@ -20,8 +20,10 @@ export function ContactDetailScreen({
   const [draft, setDraft] = useState("");
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const noteOperation = useCrmOperation();
-  const deleteOperation = useCrmOperation();
+  // Scopes tie each operation to the contact and the capability it was started
+  // with; a change drops its pending result, its error, and its retry.
+  const noteOperation = useCrmOperation(`note:${contactId}:${capabilities.update}`);
+  const deleteOperation = useCrmOperation(`delete:${contactId}:${capabilities.remove}`);
   /** Identity of the in-flight load; superseded responses are dropped. */
   const request = useRef(0);
   // Gate on identity, not just on presence: a response for another id can never
@@ -58,11 +60,16 @@ export function ContactDetailScreen({
 
   useEffect(() => {
     void load();
+    return () => {
+      // Invalidate this load: an unmounted or superseded screen never applies it.
+      request.current += 1;
+    };
   }, [load]);
 
-  // Another contact is another note draft.
+  // Another contact is another draft and another confirmation.
   useEffect(() => {
     setDraft("");
+    setConfirmingDelete(false);
   }, [contactId]);
 
   async function addNote(event: FormEvent) {
@@ -120,7 +127,7 @@ export function ContactDetailScreen({
               </button>
             )}
           </header>
-          {confirmingDelete && (
+          {capabilities.remove && confirmingDelete && (
             <ConfirmDialog
               titleId="delete-contact-title"
               title="Delete this contact?"
@@ -130,7 +137,7 @@ export function ContactDetailScreen({
               onCancel={() => setConfirmingDelete(false)}
             />
           )}
-          {deleteOperation.error && (
+          {capabilities.remove && deleteOperation.error && (
             <ErrorNotice
               error={deleteOperation.error}
               retryLabel="Retry deleting contact"
@@ -173,7 +180,7 @@ export function ContactDetailScreen({
                 </button>
               </form>
             )}
-            {noteOperation.error && (
+            {capabilities.update && noteOperation.error && (
               <ErrorNotice
                 error={noteOperation.error}
                 retryLabel="Retry saving note"

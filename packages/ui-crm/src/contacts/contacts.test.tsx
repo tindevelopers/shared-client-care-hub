@@ -1153,3 +1153,741 @@ describe("ContactImportScreen", () => {
     expect(await screen.findByRole("heading", { name: "Map columns" })).toBeInTheDocument();
   });
 });
+
+/**
+ * Operation state must never outlive the context it was started in: a pending
+ * callback, an error, or a retry from contact A / snapshot A must not mutate,
+ * render for, or navigate from B.
+ */
+describe("operation scope", () => {
+  function contactById(id: string): ContactDetailVm {
+    return id === "contact-2" ? grace : ada;
+  }
+
+  function detailAdapter(overrides: Partial<ContactsAdapter> = {}): ContactsAdapter {
+    return adapter({
+      getContact: vi.fn(async (id: string) => ok(contactById(id))),
+      ...overrides,
+    });
+  }
+
+  describe("ContactDetailScreen", () => {
+    it("closes the confirmation and retargets when the contact changes", async () => {
+      const deleteContact = vi.fn(async () => ok(undefined));
+      const source = detailAdapter({ deleteContact });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Ada Lovelace" });
+      await user.click(screen.getByRole("button", { name: "Delete contact" }));
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      view.rerender(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-2"
+        />,
+      );
+      // The confirmation belonged to contact-1 and cannot survive the change.
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(deleteContact).not.toHaveBeenCalled();
+
+      await screen.findByRole("heading", { name: "Grace Hopper" });
+      // …and it must stay closed once contact-2 has loaded.
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Delete contact" }));
+      await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+      await waitFor(() => expect(deleteContact).toHaveBeenCalledTimes(1));
+      expect(deleteContact).toHaveBeenCalledWith("contact-2");
+    });
+
+    it("invalidates a pending delete when the contact changes", async () => {
+      const pendingDelete = deferred<CrmUiResult<void>>();
+      const deleteContact = vi
+        .fn<Parameters<ContactsAdapter["deleteContact"]>, ReturnType<ContactsAdapter["deleteContact"]>>()
+        .mockReturnValue(pendingDelete.promise);
+      const routes = navigation();
+      const source = detailAdapter({ deleteContact });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          contactId="contact-1"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Ada Lovelace" });
+      await user.click(screen.getByRole("button", { name: "Delete contact" }));
+      await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+      await waitFor(() => expect(deleteContact).toHaveBeenCalledTimes(1));
+
+      view.rerender(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          contactId="contact-2"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Grace Hopper" });
+
+      await act(async () => {
+        pendingDelete.resolve(ok(undefined));
+      });
+      // contact-1's success must not navigate away from contact-2.
+      expect(routes.contacts).not.toHaveBeenCalled();
+      expect(deleteContact).toHaveBeenCalledTimes(1);
+      expect(deleteContact).toHaveBeenCalledWith("contact-1");
+      expect(screen.getByRole("heading", { name: "Grace Hopper" })).toBeInTheDocument();
+    });
+
+    it("drops a pending note result when the contact changes", async () => {
+      const pendingNote = deferred<CrmUiResult<NoteVm>>();
+      const createNote = vi
+        .fn<Parameters<ContactsAdapter["createNote"]>, ReturnType<ContactsAdapter["createNote"]>>()
+        .mockReturnValue(pendingNote.promise);
+      const source = detailAdapter({ createNote });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Ada Lovelace" });
+      await user.type(screen.getByLabelText("Add note"), "Follow up");
+      await user.click(screen.getByRole("button", { name: "Save note" }));
+      await waitFor(() => expect(createNote).toHaveBeenCalledWith("contact-1", "Follow up"));
+
+      view.rerender(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-2"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Grace Hopper" });
+      expect(screen.getByLabelText("Add note")).toHaveValue("");
+
+      await act(async () => {
+        pendingNote.resolve(
+          ok<NoteVm>({
+            id: "note-9",
+            content: "Follow up",
+            createdAt: "2026-09-19T00:00:00Z",
+            createdByLabel: null,
+          }),
+        );
+      });
+      // contact-1's note must not be appended to contact-2's timeline.
+      expect(screen.queryByText("Follow up")).not.toBeInTheDocument();
+      expect(createNote).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed when the update capability is revoked after a note failure", async () => {
+      const createNote = vi
+        .fn<Parameters<ContactsAdapter["createNote"]>, ReturnType<ContactsAdapter["createNote"]>>()
+        .mockResolvedValue(failure("Try again", true));
+      const source = detailAdapter({ createNote });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Ada Lovelace" });
+      await user.type(screen.getByLabelText("Add note"), "Follow up");
+      await user.click(screen.getByRole("button", { name: "Save note" }));
+      expect(await screen.findByRole("button", { name: "Retry saving note" })).toBeInTheDocument();
+
+      view.rerender(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, update: false }}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Retry saving note" })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Add note")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      // Re-granting the capability must not resurrect the revoked retry.
+      view.rerender(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Retry saving note" })).not.toBeInTheDocument();
+      expect(createNote).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the confirmation when the remove capability is revoked", async () => {
+      const deleteContact = vi.fn(async () => ok(undefined));
+      const source = detailAdapter({ deleteContact });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      await screen.findByRole("heading", { name: "Ada Lovelace" });
+      await user.click(screen.getByRole("button", { name: "Delete contact" }));
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      view.rerender(
+        <ContactDetailScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, remove: false }}
+          navigation={navigation()}
+          contactId="contact-1"
+        />,
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Delete contact" })).not.toBeInTheDocument();
+      expect(deleteContact).not.toHaveBeenCalled();
+    });
+
+    it("ignores a load that settles after unmount", async () => {
+      const pendingLoad = deferred<CrmUiResult<ContactDetailVm | null>>();
+      const getContact = vi
+        .fn<Parameters<ContactsAdapter["getContact"]>, ReturnType<ContactsAdapter["getContact"]>>()
+        .mockReturnValue(pendingLoad.promise);
+      const routes = navigation();
+      const view = render(
+        <ContactDetailScreen
+          adapter={adapter({ getContact })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          contactId="contact-1"
+        />,
+      );
+      expect(screen.getByRole("status")).toHaveTextContent("Loading contact…");
+
+      view.unmount();
+      await act(async () => {
+        pendingLoad.resolve(ok(ada));
+      });
+      expect(routes.contact).not.toHaveBeenCalled();
+      expect(routes.contacts).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ContactFormScreen", () => {
+    it("resets input and readiness when switching from edit to create", async () => {
+      const source = detailAdapter();
+      const view = render(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          mode="edit"
+          contactId="contact-1"
+        />,
+      );
+      expect(await screen.findByLabelText("Last name")).toHaveValue("Lovelace");
+
+      view.rerender(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          mode="create"
+        />,
+      );
+      expect(screen.getByRole("heading", { name: "New contact" })).toBeInTheDocument();
+      expect(screen.getByLabelText("First name")).toHaveValue("");
+      expect(screen.getByLabelText("Last name")).toHaveValue("");
+      expect(screen.queryByRole("button", { name: "Save contact" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create contact" })).toBeInTheDocument();
+    });
+
+    it("resets readiness when the edit id goes missing", async () => {
+      const source = detailAdapter();
+      const updateContact = vi.fn(async () => ok(ada));
+      const view = render(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          mode="edit"
+          contactId="contact-1"
+        />,
+      );
+      expect(await screen.findByLabelText("Last name")).toHaveValue("Lovelace");
+
+      view.rerender(
+        <ContactFormScreen
+          adapter={adapter({ updateContact })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          mode="edit"
+        />,
+      );
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "A contact id is required to edit a contact.",
+      );
+      expect(screen.queryByLabelText("Last name")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save contact" })).not.toBeInTheDocument();
+      expect(updateContact).not.toHaveBeenCalled();
+    });
+
+    it("does not navigate when a save settles after unmount", async () => {
+      const pendingSave = deferred<CrmUiResult<ContactDetailVm>>();
+      const createContact = vi
+        .fn<Parameters<ContactsAdapter["createContact"]>, ReturnType<ContactsAdapter["createContact"]>>()
+        .mockReturnValue(pendingSave.promise);
+      const routes = navigation();
+      const user = userEvent.setup();
+      const view = render(
+        <ContactFormScreen
+          adapter={adapter({ createContact })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          mode="create"
+        />,
+      );
+      await user.type(screen.getByLabelText("First name"), "Ada");
+      await user.type(screen.getByLabelText("Last name"), "Lovelace");
+      await user.click(screen.getByRole("button", { name: "Create contact" }));
+      await waitFor(() => expect(createContact).toHaveBeenCalledTimes(1));
+
+      view.unmount();
+      await act(async () => {
+        pendingSave.resolve(ok(ada));
+      });
+      expect(routes.contact).not.toHaveBeenCalled();
+    });
+
+    it("invalidates a pending save when the edit target changes", async () => {
+      const pendingSave = deferred<CrmUiResult<ContactDetailVm>>();
+      const updateContact = vi
+        .fn<Parameters<ContactsAdapter["updateContact"]>, ReturnType<ContactsAdapter["updateContact"]>>()
+        .mockReturnValue(pendingSave.promise);
+      const routes = navigation();
+      const source = detailAdapter({ updateContact });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          mode="edit"
+          contactId="contact-1"
+        />,
+      );
+      expect(await screen.findByLabelText("Last name")).toHaveValue("Lovelace");
+      await user.click(screen.getByRole("button", { name: "Save contact" }));
+      await waitFor(() => expect(updateContact).toHaveBeenCalledTimes(1));
+
+      view.rerender(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          mode="edit"
+          contactId="contact-2"
+        />,
+      );
+      expect(await screen.findByLabelText("Last name")).toHaveValue("Hopper");
+
+      await act(async () => {
+        pendingSave.resolve(ok(ada));
+      });
+      expect(routes.contact).not.toHaveBeenCalled();
+      expect(updateContact).toHaveBeenCalledTimes(1);
+      expect(updateContact).toHaveBeenCalledWith(
+        "contact-1",
+        expect.objectContaining({ first_name: "Ada", last_name: "Lovelace" }),
+      );
+    });
+
+    it("invalidates a pending save when the create capability is revoked", async () => {
+      const pendingSave = deferred<CrmUiResult<ContactDetailVm>>();
+      const createContact = vi
+        .fn<Parameters<ContactsAdapter["createContact"]>, ReturnType<ContactsAdapter["createContact"]>>()
+        .mockReturnValue(pendingSave.promise);
+      const routes = navigation();
+      const source = adapter({ createContact });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+          mode="create"
+        />,
+      );
+      await user.type(screen.getByLabelText("First name"), "Ada");
+      await user.type(screen.getByLabelText("Last name"), "Lovelace");
+      await user.click(screen.getByRole("button", { name: "Create contact" }));
+      await waitFor(() => expect(createContact).toHaveBeenCalledTimes(1));
+
+      view.rerender(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, create: false }}
+          navigation={routes}
+          mode="create"
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Create contact" })).not.toBeInTheDocument();
+
+      await act(async () => {
+        pendingSave.resolve(ok(ada));
+      });
+      expect(routes.contact).not.toHaveBeenCalled();
+    });
+
+    it("drops a stale save retry when the edit target changes", async () => {
+      const updateContact = vi
+        .fn<Parameters<ContactsAdapter["updateContact"]>, ReturnType<ContactsAdapter["updateContact"]>>()
+        .mockResolvedValue(failure("Try again", true));
+      const source = detailAdapter({ updateContact });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          mode="edit"
+          contactId="contact-1"
+        />,
+      );
+      expect(await screen.findByLabelText("Last name")).toHaveValue("Lovelace");
+      await user.click(screen.getByRole("button", { name: "Save contact" }));
+      expect(await screen.findByRole("button", { name: "Retry saving contact" })).toBeInTheDocument();
+
+      view.rerender(
+        <ContactFormScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+          mode="edit"
+          contactId="contact-2"
+        />,
+      );
+      expect(await screen.findByLabelText("Last name")).toHaveValue("Hopper");
+      expect(screen.queryByRole("button", { name: "Retry saving contact" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(updateContact).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("ContactsScreen bulk actions", () => {
+    async function failBulkDelete(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace" }));
+      await user.click(screen.getByRole("button", { name: "Delete selected" }));
+      await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Try again");
+      expect(screen.getByRole("button", { name: "Retry deleting selected contacts" })).toBeInTheDocument();
+    }
+
+    it("drops the bulk retry when the selection changes", async () => {
+      const bulkDeleteContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["bulkDeleteContacts"]>,
+          ReturnType<ContactsAdapter["bulkDeleteContacts"]>
+        >()
+        .mockResolvedValue(failure("Try again", true));
+      const source = adapter({
+        listContacts: vi.fn(async () => ok(pageOf([ada], 45))),
+        bulkDeleteContacts,
+      });
+      const user = userEvent.setup();
+      render(
+        <ContactsScreen adapter={source} capabilities={ALL_CAPABILITIES} navigation={navigation()} />,
+      );
+      await screen.findByRole("cell", { name: "Ada Lovelace" });
+      await failBulkDelete(user);
+
+      // A retry is only valid for the exact selected-id set it failed with.
+      await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace" }));
+      expect(screen.queryByRole("button", { name: "Retry deleting selected contacts" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace" }));
+      expect(screen.queryByRole("button", { name: "Retry deleting selected contacts" })).not.toBeInTheDocument();
+      expect(bulkDeleteContacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the bulk retry when the query clears the selection", async () => {
+      const bulkDeleteContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["bulkDeleteContacts"]>,
+          ReturnType<ContactsAdapter["bulkDeleteContacts"]>
+        >()
+        .mockResolvedValue(failure("Try again", true));
+      const source = adapter({
+        listContacts: vi.fn(async () => ok(pageOf([ada], 45))),
+        bulkDeleteContacts,
+      });
+      const user = userEvent.setup();
+      render(
+        <ContactsScreen adapter={source} capabilities={ALL_CAPABILITIES} navigation={navigation()} />,
+      );
+      await screen.findByRole("cell", { name: "Ada Lovelace" });
+      await failBulkDelete(user);
+
+      await user.type(screen.getByRole("searchbox"), "Ada");
+      await user.click(screen.getByRole("button", { name: "Search" }));
+
+      await waitFor(() => expect(screen.getByText("0 selected")).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Retry deleting selected contacts" })).not.toBeInTheDocument();
+      expect(bulkDeleteContacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the bulk retry when the remove capability is revoked", async () => {
+      const bulkDeleteContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["bulkDeleteContacts"]>,
+          ReturnType<ContactsAdapter["bulkDeleteContacts"]>
+        >()
+        .mockResolvedValue(failure("Try again", true));
+      const source = adapter({
+        listContacts: vi.fn(async () => ok(pageOf([ada], 45))),
+        bulkDeleteContacts,
+      });
+      const user = userEvent.setup();
+      const view = render(
+        <ContactsScreen adapter={source} capabilities={ALL_CAPABILITIES} navigation={navigation()} />,
+      );
+      await screen.findByRole("cell", { name: "Ada Lovelace" });
+      await failBulkDelete(user);
+
+      view.rerender(
+        <ContactsScreen
+          adapter={source}
+          capabilities={{ ...ALL_CAPABILITIES, remove: false }}
+          navigation={navigation()}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Delete selected" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry deleting selected contacts" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      view.rerender(
+        <ContactsScreen adapter={source} capabilities={ALL_CAPABILITIES} navigation={navigation()} />,
+      );
+      expect(screen.queryByRole("button", { name: "Retry deleting selected contacts" })).not.toBeInTheDocument();
+      expect(bulkDeleteContacts).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("ContactImportScreen", () => {
+    const importFile = () =>
+      new File(["First,Email\nAda,ada@example.com"], "contacts.csv", { type: "text/csv" });
+
+    async function parseMapAndPreview(
+      user: ReturnType<typeof userEvent.setup>,
+      file: File = importFile(),
+    ) {
+      await user.upload(screen.getByLabelText<HTMLInputElement>("Contact file"), file);
+      expect(await screen.findByRole("heading", { name: "Map columns" })).toBeInTheDocument();
+      await user.selectOptions(screen.getByLabelText("Map First"), "first_name");
+      await user.selectOptions(screen.getByLabelText("Map Email"), "email");
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+    }
+
+    it("cannot re-import an identical successful snapshot after changing away and back", async () => {
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockResolvedValue(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+
+      // Away: the result belongs to the snapshot that produced it.
+      await user.selectOptions(screen.getByLabelText("Map Email"), "ignore");
+      await waitFor(() =>
+        expect(screen.queryByText("Imported 1; skipped 0.")).not.toBeInTheDocument(),
+      );
+
+      // Back: the identical successful snapshot can never be imported twice.
+      await user.selectOptions(screen.getByLabelText("Map Email"), "email");
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeDisabled();
+      expect(
+        await screen.findByText("This file and mapping were already imported."),
+      ).toBeInTheDocument();
+      expect(importContacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a failed commit retry when the mapping changes, then commits the new snapshot", async () => {
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockResolvedValueOnce(failure("Try again", true))
+        .mockResolvedValue(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      expect(await screen.findByRole("button", { name: "Retry importing contacts" })).toBeInTheDocument();
+
+      // The retry belongs to the old snapshot only.
+      await user.selectOptions(screen.getByLabelText("Map Email"), "ignore");
+      expect(screen.queryByRole("button", { name: "Retry importing contacts" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByText("1 valid, 0 invalid")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(2));
+      expect(importContacts).toHaveBeenNthCalledWith(2, {
+        rows: parsedA.rows,
+        mapping: { First: "first_name", Email: "ignore" },
+      });
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+    });
+
+    it("resets imported snapshots only for a genuinely new file", async () => {
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockResolvedValue(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      const source = adapter({
+        importContacts,
+        parseImportFile: vi
+          .fn<
+            Parameters<ContactsAdapter["parseImportFile"]>,
+            ReturnType<ContactsAdapter["parseImportFile"]>
+          >()
+          .mockResolvedValueOnce(ok(parsedA))
+          .mockResolvedValue(ok(parsedB)),
+      });
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={source}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+
+      // New rows are a new snapshot: committing it is allowed.
+      await user.upload(screen.getByLabelText<HTMLInputElement>("Contact file"), importFile());
+      await screen.findByLabelText("Map Name");
+      await user.selectOptions(screen.getByLabelText("Map Name"), "first_name");
+      await user.click(screen.getByRole("button", { name: "Preview import" }));
+      expect(await screen.findByText("1 valid, 0 invalid")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeEnabled();
+
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(2));
+      expect(importContacts).toHaveBeenNthCalledWith(2, {
+        rows: parsedB.rows,
+        mapping: { Name: "first_name" },
+      });
+    });
+
+    it("disables the file and mapping controls while a commit is pending", async () => {
+      const pendingCommit = deferred<CrmUiResult<ContactsImportResult>>();
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockReturnValue(pendingCommit.promise);
+      const user = userEvent.setup();
+      render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={navigation()}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+
+      expect(screen.getByLabelText<HTMLInputElement>("Contact file")).toBeDisabled();
+      expect(screen.getByLabelText("Map First")).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Preview import" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Import contacts" })).toBeDisabled();
+
+      await act(async () => {
+        pendingCommit.resolve(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      });
+      expect(await screen.findByText("Imported 1; skipped 0.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Map First")).toBeEnabled();
+      expect(importContacts).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a commit that settles after unmount", async () => {
+      const pendingCommit = deferred<CrmUiResult<ContactsImportResult>>();
+      const importContacts = vi
+        .fn<
+          Parameters<ContactsAdapter["importContacts"]>,
+          ReturnType<ContactsAdapter["importContacts"]>
+        >()
+        .mockReturnValue(pendingCommit.promise);
+      const routes = navigation();
+      const user = userEvent.setup();
+      const view = render(
+        <ContactImportScreen
+          adapter={adapter({ importContacts })}
+          capabilities={ALL_CAPABILITIES}
+          navigation={routes}
+        />,
+      );
+      await parseMapAndPreview(user);
+      await user.click(screen.getByRole("button", { name: "Import contacts" }));
+      await waitFor(() => expect(importContacts).toHaveBeenCalledTimes(1));
+
+      view.unmount();
+      await act(async () => {
+        pendingCommit.resolve(ok<ContactsImportResult>({ imported: 1, skipped: 0 }));
+      });
+      expect(routes.contacts).not.toHaveBeenCalled();
+    });
+  });
+});
