@@ -57,7 +57,11 @@ export function CampaignAnalyticsScreen({
           </table>
           {analyticsExtensions.map(({ id, label, Panel }) => (
             <section key={id} aria-label={label}>
-              <ExtensionPanelBoundary key={`${campaignId}:${id}`} resetKey={JSON.stringify(stats)}>
+              <ExtensionPanelBoundary
+                key={`${campaignId}:${id}`}
+                implementation={Panel}
+                resetKey={JSON.stringify(stats)}
+              >
                 <Panel campaignId={campaignId} data={stats as unknown as JsonValue} />
               </ExtensionPanelBoundary>
             </section>

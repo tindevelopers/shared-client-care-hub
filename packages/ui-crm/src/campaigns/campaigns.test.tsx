@@ -3,14 +3,17 @@
 import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type {
-  AudienceSourceExtension,
-  CampaignChannelExtension,
+  AudienceSourceExtensionDefinition,
   CrmCapabilities,
   CrmNavigation,
   CrmUiResult,
   JsonValue,
+} from "../index";
+import {
+  defineAudienceSourceExtension,
+  defineCampaignChannelExtension,
 } from "../index";
 import {
   CampaignAnalyticsScreen,
@@ -21,7 +24,6 @@ import {
   type CampaignDetailVm,
   type CampaignPage,
   type CampaignsAdapter,
-  type CampaignWizardScreenProps,
 } from "../campaigns";
 
 const capabilities: CrmCapabilities = {
@@ -246,11 +248,12 @@ describe("CampaignWizardScreen", () => {
     }
     const user = userEvent.setup();
     render(<CampaignWizardScreen adapter={adapter()} capabilities={capabilities}
-      navigation={navigation} channelExtensions={[{
+      navigation={navigation} channelExtensions={[defineCampaignChannelExtension({
         id: "provider", label: "Provider", Panel,
+        initialValue: null,
         validate: () => { throw new Error("secret"); },
         serialize: (value) => value,
-      }]} />);
+      })]} />);
     await user.type(screen.getByLabelText("Campaign name"), "New campaign");
     await user.selectOptions(screen.getByLabelText("Channel configuration"), "provider");
     await user.type(screen.getByLabelText("Provider token"), "abc");
@@ -306,8 +309,11 @@ describe("CampaignWizardScreen", () => {
   });
 
   it("preserves unknown audience and settings during a name-only edit", async () => {
+    const originalStart = "2026-10-01T09:00:00+05:00";
     const source = adapter({
-      getCampaign: vi.fn(async () => ok({ ...detail, settings: { providerSecret: "opaque" } })),
+      getCampaign: vi.fn(async () => ok({
+        ...detail, schedule_start: originalStart, settings: { providerSecret: "opaque" },
+      })),
     });
     const user = userEvent.setup();
     render(<CampaignWizardScreen campaignId="campaign-1" adapter={source}
@@ -319,6 +325,7 @@ describe("CampaignWizardScreen", () => {
     await waitFor(() => expect(source.updateCampaign).toHaveBeenCalled());
     const patch = vi.mocked(source.updateCampaign).mock.calls[0]?.[1];
     expect(patch).not.toHaveProperty("settings");
+    expect(patch?.schedule_start).toBe(originalStart);
     expect(source.replaceAudience).not.toHaveBeenCalled();
   });
 
@@ -328,53 +335,134 @@ describe("CampaignWizardScreen", () => {
     render(<CampaignWizardScreen adapter={source} capabilities={capabilities}
       navigation={navigation} />);
     await user.type(screen.getByLabelText("Campaign name"), "Complete input");
-    await user.type(screen.getByLabelText("Schedule start"), "2026-10-01T09:00:00Z");
-    await user.type(screen.getByLabelText("Schedule end"), "2026-10-02T09:00:00Z");
-    await user.type(screen.getByLabelText("Calling window start"), "09:00:00");
-    await user.type(screen.getByLabelText("Calling window end"), "17:00:00");
+    await user.type(screen.getByLabelText("Schedule start"), "2026-10-01T09:00");
+    await user.type(screen.getByLabelText("Schedule end"), "2026-10-02T09:00");
+    await user.type(screen.getByLabelText("Calling window start"), "09:00");
+    await user.type(screen.getByLabelText("Calling window end"), "17:00");
     await user.type(screen.getByLabelText("Calling days"), "1, 3, 5");
     await user.type(screen.getByLabelText("Timezone"), "UTC");
     await user.type(screen.getByLabelText("Message template"), "Hello");
     await user.click(screen.getByRole("button", { name: "Create campaign" }));
     await waitFor(() => expect(source.createCampaign).toHaveBeenCalledWith(expect.objectContaining({
-      schedule_start: "2026-10-01T09:00:00Z",
-      schedule_end: "2026-10-02T09:00:00Z",
-      calling_window_start: "09:00:00",
-      calling_window_end: "17:00:00",
+      schedule_start: new Date("2026-10-01T09:00").toISOString(),
+      schedule_end: new Date("2026-10-02T09:00").toISOString(),
+      calling_window_start: "09:00",
+      calling_window_end: "17:00",
       calling_days: [1, 3, 5],
       timezone: "UTC",
       message_template: "Hello",
     })));
   });
 
-  it("supports homogeneous typed extension configs and explicit null configs", async () => {
-    type Config = { token: string } | null;
-    function TypedPanel({ value, onChange }: {
-      value: Config; disabled: boolean; onChange(value: Config): void;
-    }) {
-      return <button type="button" onClick={() => onChange(null)}>
-        {value === null ? "Null config" : value.token}
-      </button>;
-    }
-    const audienceExtension: AudienceSourceExtension<Config> = {
-      id: "typed-audience", label: "Typed audience", initialValue: { token: "audience" },
-      Panel: TypedPanel, validate: () => ok(undefined), serialize: (value) => value,
-    };
-    const channelExtension: CampaignChannelExtension<Config> = {
-      id: "typed-channel", label: "Typed channel", initialValue: { token: "channel" },
-      Panel: TypedPanel, validate: () => ok(undefined), serialize: (value) => value,
-    };
-    const props: CampaignWizardScreenProps<Config, Config> = {
-      adapter: adapter(), capabilities, navigation,
-      audienceExtensions: [audienceExtension], channelExtensions: [channelExtension],
-    };
+  it.each([
+    {
+      label: "schedule order",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Schedule start"), "2026-10-02T09:00");
+        await user.type(screen.getByLabelText("Schedule end"), "2026-10-01T09:00");
+      },
+      message: "Schedule end must be after schedule start.",
+    },
+    {
+      label: "calling window order",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Calling window start"), "17:00");
+        await user.type(screen.getByLabelText("Calling window end"), "09:00");
+      },
+      message: "Calling window end must be after its start.",
+    },
+    {
+      label: "timezone",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Timezone"), "Mars/Olympus");
+      },
+      message: "Enter a valid IANA timezone.",
+    },
+    {
+      label: "empty calling-day token",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Calling days"), "1,,3");
+      },
+      message: "Calling days must be unique integers from 0 through 6.",
+    },
+    {
+      label: "duplicate calling day",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Calling days"), "1,1");
+      },
+      message: "Calling days must be unique integers from 0 through 6.",
+    },
+    {
+      label: "out-of-range calling day",
+      fill: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.type(screen.getByLabelText("Calling days"), "7");
+      },
+      message: "Calling days must be unique integers from 0 through 6.",
+    },
+  ])("rejects invalid $label", async ({ fill, message }) => {
+    const source = adapter();
     const user = userEvent.setup();
-    render(<CampaignWizardScreen {...props} />);
-    await user.selectOptions(screen.getByLabelText("Audience configuration"), "typed-audience");
-    await user.selectOptions(screen.getByLabelText("Channel configuration"), "typed-channel");
-    await user.click(screen.getByRole("button", { name: "audience" }));
-    expect(screen.getByRole("button", { name: "Null config" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "channel" })).toBeInTheDocument();
+    render(<CampaignWizardScreen adapter={source} capabilities={capabilities}
+      navigation={navigation} />);
+    await user.type(screen.getByLabelText("Campaign name"), "Invalid campaign");
+    await fill(user);
+    await user.click(screen.getByRole("button", { name: "Create campaign" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(source.createCampaign).not.toHaveBeenCalled();
+  });
+
+  it("fully resets state across create and edit owners before paint", async () => {
+    const pending = deferred<CrmUiResult<CampaignDetailVm | null>>();
+    const source = adapter({ getCampaign: vi.fn(() => pending.promise) });
+    const user = userEvent.setup();
+    const { rerender } = render(<CampaignWizardScreen adapter={source}
+      capabilities={capabilities} navigation={navigation} />);
+    await user.type(screen.getByLabelText("Campaign name"), "Create draft");
+    await user.type(screen.getByLabelText("Timezone"), "UTC");
+    rerender(<CampaignWizardScreen campaignId="campaign-2" adapter={source}
+      capabilities={capabilities} navigation={navigation} />);
+    expect(screen.queryByDisplayValue("Create draft")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save campaign" })).not.toBeInTheDocument();
+    await act(async () => pending.resolve(ok({
+      ...detail, id: "campaign-2", name: "Edit owner", timezone: "America/New_York",
+    })));
+    expect(await screen.findByDisplayValue("Edit owner")).toBeInTheDocument();
+    rerender(<CampaignWizardScreen adapter={source}
+      capabilities={capabilities} navigation={navigation} />);
+    expect(screen.getByLabelText("Campaign name")).toHaveValue("");
+    expect(screen.getByLabelText("Timezone")).toHaveValue("");
+    expect(screen.queryByDisplayValue("Edit owner")).not.toBeInTheDocument();
+  });
+
+  it("supports mixed strongly typed extension definitions without host casts", async () => {
+    type FileConfig = { path: string };
+    type SheetConfig = { sheetId: number };
+    function FilePanel({ value }: {
+      value: FileConfig; disabled: boolean; onChange(value: FileConfig): void;
+    }) {
+      return <p>File {value.path}</p>;
+    }
+    function SheetPanel({ value }: {
+      value: SheetConfig; disabled: boolean; onChange(value: SheetConfig): void;
+    }) {
+      return <p>Sheet {value.sheetId}</p>;
+    }
+    const file = defineAudienceSourceExtension<FileConfig>({
+      id: "file", label: "File", initialValue: { path: "contacts.csv" },
+      Panel: FilePanel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    const sheet = defineAudienceSourceExtension<SheetConfig>({
+      id: "sheet", label: "Sheet", initialValue: { sheetId: 42 },
+      Panel: SheetPanel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    expectTypeOf([file, sheet]).toMatchTypeOf<AudienceSourceExtensionDefinition[]>();
+    const user = userEvent.setup();
+    render(<CampaignWizardScreen adapter={adapter()} capabilities={capabilities}
+      navigation={navigation} audienceExtensions={[file, sheet]} />);
+    await user.selectOptions(screen.getByLabelText("Audience configuration"), "file");
+    expect(screen.getByText("File contacts.csv")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Audience configuration"), "sheet");
+    expect(screen.getByText("Sheet 42")).toBeInTheDocument();
   });
 
   it("keeps extension configs scoped while switching selections", async () => {
@@ -384,15 +472,15 @@ describe("CampaignWizardScreen", () => {
       return <label>Extension value<input value={String(value)}
         onChange={(event) => onChange(event.target.value)} /></label>;
     }
-    const extensions: CampaignChannelExtension[] = [
-      {
+    const extensions = [
+      defineCampaignChannelExtension({
         id: "one", label: "One", initialValue: "one",
         Panel: ConfigPanel, validate: () => ok(undefined), serialize: (value) => value,
-      },
-      {
+      }),
+      defineCampaignChannelExtension({
         id: "two", label: "Two", initialValue: "two",
         Panel: ConfigPanel, validate: () => ok(undefined), serialize: (value) => value,
-      },
+      }),
     ];
     const user = userEvent.setup();
     render(<CampaignWizardScreen adapter={adapter()} capabilities={capabilities}
@@ -407,23 +495,66 @@ describe("CampaignWizardScreen", () => {
   });
 
   it("contains throwing extension panels and keeps the canonical form usable", async () => {
-    function ThrowingPanel(): never {
-      throw new Error("secret panel failure");
+    let shouldThrow = true;
+    function ThrowingPanel() {
+      if (shouldThrow) throw new Error("secret panel failure");
+      return <p>Panel recovered</p>;
     }
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const user = userEvent.setup();
       render(<CampaignWizardScreen adapter={adapter()} capabilities={capabilities}
-        navigation={navigation} channelExtensions={[{
+        navigation={navigation} channelExtensions={[defineCampaignChannelExtension({
           id: "thrower", label: "Thrower", Panel: ThrowingPanel,
+          initialValue: null,
           validate: () => ok(undefined), serialize: (value) => value,
-        }]} />);
+        })]} />);
       await user.selectOptions(screen.getByLabelText("Channel configuration"), "thrower");
       expect(await screen.findByText("Extension panel unavailable.")).toBeInTheDocument();
       expect(screen.getByLabelText("Campaign name")).toBeInTheDocument();
+      shouldThrow = false;
+      await user.click(screen.getByRole("button", { name: "Retry extension panel" }));
+      expect(await screen.findByText("Panel recovered")).toBeInTheDocument();
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("ignores stale provider callbacks after the wizard owner changes", async () => {
+    let delayedChange: ((value: JsonValue) => void) | undefined;
+    function DelayedPanel({ onChange }: {
+      value: JsonValue; disabled: boolean; onChange(value: JsonValue): void;
+    }) {
+      delayedChange = onChange;
+      return <p>Delayed panel</p>;
+    }
+    const extension = defineCampaignChannelExtension({
+      id: "delayed", label: "Delayed", initialValue: { token: "" },
+      Panel: DelayedPanel, validate: () => ok(undefined), serialize: (value) => value,
+    });
+    const source = adapter({
+      getCampaign: vi.fn(async (id) => ok({
+        ...detail, id, name: id === "campaign-a" ? "Campaign A" : "Campaign B",
+      })),
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(<CampaignWizardScreen campaignId="campaign-a"
+      adapter={source} capabilities={capabilities} navigation={navigation}
+      channelExtensions={[extension]} />);
+    await screen.findByDisplayValue("Campaign A");
+    await user.selectOptions(screen.getByLabelText("Channel configuration"), "delayed");
+    expect(delayedChange).toBeDefined();
+    const staleChange = delayedChange;
+    rerender(<CampaignWizardScreen campaignId="campaign-b"
+      adapter={source} capabilities={capabilities} navigation={navigation}
+      channelExtensions={[extension]} />);
+    const name = await screen.findByDisplayValue("Campaign B");
+    act(() => staleChange?.({ token: "stale" }));
+    await user.clear(name);
+    await user.type(name, "Campaign B renamed");
+    await user.click(screen.getByRole("button", { name: "Save campaign" }));
+    await waitFor(() => expect(source.updateCampaign).toHaveBeenCalled());
+    expect(vi.mocked(source.updateCampaign).mock.calls.at(-1)?.[1]).not.toHaveProperty("settings");
   });
 
   it("retries the exact edit mutation and clears retry when update is revoked", async () => {
@@ -541,5 +672,28 @@ describe("CampaignAnalyticsScreen", () => {
     })} capabilities={capabilities} navigation={navigation} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Analytics failed");
     expect(screen.getByRole("button", { name: "Retry loading analytics" })).toBeInTheDocument();
+  });
+
+  it("recovers a failed analytics panel when its implementation is replaced", async () => {
+    function Broken(): never {
+      throw new Error("broken");
+    }
+    function Replacement() {
+      return <p>Replacement analytics</p>;
+    }
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const source = adapter();
+      const { rerender } = render(<CampaignAnalyticsScreen campaignId="campaign-1"
+        adapter={source} capabilities={capabilities} navigation={navigation}
+        analyticsExtensions={[{ id: "provider", label: "Provider", Panel: Broken }]} />);
+      expect(await screen.findByText("Extension panel unavailable.")).toBeInTheDocument();
+      rerender(<CampaignAnalyticsScreen campaignId="campaign-1"
+        adapter={source} capabilities={capabilities} navigation={navigation}
+        analyticsExtensions={[{ id: "provider", label: "Provider", Panel: Replacement }]} />);
+      expect(await screen.findByText("Replacement analytics")).toBeInTheDocument();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface ExtensionPanelBoundaryProps {
   children: ReactNode;
+  implementation: unknown;
   resetKey: string;
 }
 
@@ -24,14 +25,25 @@ export class ExtensionPanelBoundary extends Component<
   }
 
   componentDidUpdate(previous: ExtensionPanelBoundaryProps): void {
-    if (this.state.failed && previous.resetKey !== this.props.resetKey) {
+    if (
+      this.state.failed &&
+      (previous.resetKey !== this.props.resetKey ||
+        previous.implementation !== this.props.implementation)
+    ) {
       this.setState({ failed: false });
     }
   }
 
   render() {
     return this.state.failed
-      ? <p role="alert">Extension panel unavailable.</p>
+      ? (
+        <div role="alert">
+          <p>Extension panel unavailable.</p>
+          <button type="button" onClick={() => this.setState({ failed: false })}>
+            Retry extension panel
+          </button>
+        </div>
+      )
       : this.props.children;
   }
 }
