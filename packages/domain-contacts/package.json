@@ -1,6 +1,6 @@
 {
   "name": "@tindevelopers/domain-contacts",
-  "version": "1.1.0",
+  "version": "1.2.0-rc.0",
   "license": "MIT",
   "description": "Contacts domain package — owns the canonical contacts aggregate: tenant-tier store, system-tier store, suppression + crm-sync subscribers, segment materializer",
   "main": "./dist/index.js",

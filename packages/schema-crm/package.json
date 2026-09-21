@@ -1,6 +1,6 @@
 {
   "name": "@tindevelopers/schema-crm",
-  "version": "1.0.0",
+  "version": "1.1.0-rc.0",
   "license": "MIT",
   "description": "CRM shell Zod schemas, row/insert/update types, manifest, and ground-truth migrations for the seven existing CRM tables",
   "main": "./dist/index.js",
