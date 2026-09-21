@@ -369,4 +369,69 @@ describe("SuppressionScreen", () => {
     expect(screen.getByLabelText("Bulk channel")).toBeEnabled();
     expect(screen.getByLabelText("Search suppression")).toBeEnabled();
   });
+
+  it("keeps the screen locked across a pending row write and retries exactly", async () => {
+    const pending = deferred<CrmUiResult<void>>();
+    const setSuppression = vi
+      .fn<Parameters<SuppressionAdapter["setSuppression"]>, ReturnType<SuppressionAdapter["setSuppression"]>>()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue(ok(undefined));
+    const listSuppressions = vi.fn(async () => ok(page()));
+    const source = adapter({ setSuppression, listSuppressions });
+    const user = userEvent.setup();
+    render(<SuppressionScreen adapter={source} capabilities={capabilities} />);
+    await screen.findByRole("cell", { name: "email" });
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+
+    expect(screen.getByLabelText("Channel")).toBeDisabled();
+    expect(screen.getByLabelText("State")).toBeDisabled();
+    expect(screen.getByLabelText("Search suppression")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Allow sms" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set selected suppression" })).toBeDisabled();
+    await user.selectOptions(screen.getByLabelText("Channel"), "sms");
+    await user.click(screen.getByRole("button", { name: "Allow sms" }));
+    expect(setSuppression).toHaveBeenCalledTimes(1);
+    expect(listSuppressions).toHaveBeenCalledTimes(1);
+
+    await act(async () => pending.resolve(failure<void>()));
+    const retry = await screen.findByRole("button", {
+      name: "Retry setting email suppression",
+    });
+    expect(screen.getByLabelText("Channel")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Allow sms" })).toBeEnabled();
+    await user.click(retry);
+    await waitFor(() => expect(setSuppression).toHaveBeenCalledTimes(2));
+    expect(setSuppression.mock.calls[1][0]).toEqual(setSuppression.mock.calls[0][0]);
+  });
+
+  it("blocks row writes while bulk is pending and bulk writes while a row is pending", async () => {
+    const pendingBulk = deferred<CrmUiResult<{ updated: number }>>();
+    const pendingRow = deferred<CrmUiResult<void>>();
+    const bulkSetSuppression = vi
+      .fn<Parameters<SuppressionAdapter["bulkSetSuppression"]>, ReturnType<SuppressionAdapter["bulkSetSuppression"]>>()
+      .mockReturnValueOnce(pendingBulk.promise);
+    const setSuppression = vi
+      .fn<Parameters<SuppressionAdapter["setSuppression"]>, ReturnType<SuppressionAdapter["setSuppression"]>>()
+      .mockReturnValueOnce(pendingRow.promise);
+    const source = adapter({ bulkSetSuppression, setSuppression });
+    const user = userEvent.setup();
+    render(<SuppressionScreen adapter={source} capabilities={capabilities} />);
+    await screen.findByRole("cell", { name: "email" });
+
+    const selection = screen.getByRole("checkbox", { name: "Select Ada Lovelace email" });
+    await user.click(selection);
+    await user.click(screen.getByRole("button", { name: "Set selected suppression" }));
+    expect(screen.getByRole("button", { name: "Allow email" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+    expect(setSuppression).not.toHaveBeenCalled();
+    await act(async () => pendingBulk.resolve(failure<{ updated: number }>()));
+    expect(screen.getByRole("button", { name: "Allow email" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Allow email" }));
+    expect(screen.getByRole("button", { name: "Set selected suppression" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Set selected suppression" }));
+    expect(bulkSetSuppression).toHaveBeenCalledTimes(1);
+    await act(async () => pendingRow.resolve(failure<void>()));
+    expect(screen.getByRole("button", { name: "Set selected suppression" })).toBeEnabled();
+  });
 });

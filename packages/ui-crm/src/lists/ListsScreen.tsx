@@ -57,9 +57,11 @@ export function ListsScreen({
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [createLocked, setCreateLocked] = useState(false);
   const [editLocked, setEditLocked] = useState(false);
+  const [deleteLocked, setDeleteLocked] = useState(false);
   const request = useRef(0);
   const createLock = useRef(false);
   const editLock = useRef(false);
+  const deleteLock = useRef(false);
   const queryKey = JSON.stringify(query);
   const createPayload = normalizeInput(draft);
   const editPayload = editing ? normalizePatch(editing) : null;
@@ -118,6 +120,7 @@ export function ListsScreen({
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
+    if (deleteLock.current) return;
     setQuery((current) => ({ ...current, search: search.trim() || undefined, offset: 0 }));
   }
 
@@ -185,13 +188,32 @@ export function ListsScreen({
   }
 
   async function remove() {
-    if (!deleting || !capabilities.remove) return;
+    if (!deleting || !capabilities.remove || deleteLock.current) return;
     const target = deleting;
+    deleteLock.current = true;
+    setDeleteLocked(true);
     setConfirmingDelete(false);
-    await deleteOperation.start(() => adapter.deleteList(target.id), () => {
-      setDeleting(null);
-      void load();
-    });
+    try {
+      await deleteOperation.start(() => adapter.deleteList(target.id), () => {
+        setDeleting(null);
+        void load();
+      });
+    } finally {
+      deleteLock.current = false;
+      setDeleteLocked(false);
+    }
+  }
+
+  async function retryDelete() {
+    if (deleteLock.current) return;
+    deleteLock.current = true;
+    setDeleteLocked(true);
+    try {
+      await deleteOperation.retry();
+    } finally {
+      deleteLock.current = false;
+      setDeleteLocked(false);
+    }
   }
 
   return (
@@ -200,9 +222,16 @@ export function ListsScreen({
       <form role="search" onSubmit={submitSearch}>
         <label>
           Search lists
-          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <input
+            type="search"
+            disabled={deleteLocked}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
         </label>
-        <button type="submit">Search</button>
+        <button type="submit" disabled={deleteLocked}>
+          Search
+        </button>
       </form>
 
       {capabilities.create && (
@@ -258,7 +287,11 @@ export function ListsScreen({
         <ul>
           {page.items.map((item) => (
             <li key={item.id}>
-              <button type="button" onClick={() => navigation.list(item.id)}>
+              <button
+                type="button"
+                disabled={deleteLocked}
+                onClick={() => navigation.list(item.id)}
+              >
                 {item.name}
               </button>
               <span>{item.memberCount} members</span>
@@ -274,6 +307,7 @@ export function ListsScreen({
               {capabilities.remove && (
                 <button
                   type="button"
+                  disabled={deleteLocked}
                   onClick={() => {
                     setDeleting(item);
                     setConfirmingDelete(true);
@@ -344,7 +378,7 @@ export function ListsScreen({
           titleId="delete-list-title"
           title={`Delete ${deleting.name}?`}
           confirmLabel="Confirm delete"
-          pending={deleteOperation.pending}
+          pending={deleteLocked}
           onConfirm={() => void remove()}
           onCancel={() => {
             setConfirmingDelete(false);
@@ -356,7 +390,7 @@ export function ListsScreen({
         <ErrorNotice
           error={deleteOperation.error}
           retryLabel="Retry deleting list"
-          onRetry={deleteOperation.retry}
+          onRetry={() => void retryDelete()}
         />
       )}
 
@@ -364,7 +398,7 @@ export function ListsScreen({
         <nav aria-label="List pages">
           <button
             type="button"
-            disabled={query.offset === 0}
+            disabled={deleteLocked || query.offset === 0}
             onClick={() =>
               setQuery((current) => ({
                 ...current,
@@ -376,7 +410,7 @@ export function ListsScreen({
           </button>
           <button
             type="button"
-            disabled={query.offset + query.limit >= page.total}
+            disabled={deleteLocked || query.offset + query.limit >= page.total}
             onClick={() =>
               setQuery((current) => ({ ...current, offset: current.offset + current.limit }))
             }

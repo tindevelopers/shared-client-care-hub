@@ -25,10 +25,11 @@ interface RowProps {
   item: ContactSuppressionVm;
   allowed: boolean;
   selectable: boolean;
-  selectionDisabled: boolean;
+  mutationLocked: boolean;
   selected: boolean;
   onSelect(checked: boolean): void;
   onComplete(): void;
+  runMutation(attempt: () => Promise<unknown>): Promise<boolean>;
 }
 
 function SuppressionRow({
@@ -36,15 +37,14 @@ function SuppressionRow({
   item,
   allowed,
   selectable,
-  selectionDisabled,
+  mutationLocked,
   selected,
   onSelect,
   onComplete,
+  runMutation,
 }: RowProps) {
   const [reason, setReason] = useState(item.reason ?? "");
   const [source, setSource] = useState(item.source);
-  const [locked, setLocked] = useState(false);
-  const lock = useRef(false);
   const input: SetSuppressionInput = {
     contact_id: item.contact_id,
     channel: item.channel,
@@ -71,27 +71,14 @@ function SuppressionRow({
   }, [revisionKey]);
 
   async function setSuppression() {
-    if (!allowed || lock.current) return;
-    lock.current = true;
-    setLocked(true);
-    try {
-      await operation.start(() => adapter.setSuppression(input), onComplete);
-    } finally {
-      lock.current = false;
-      setLocked(false);
-    }
+    if (!allowed) return;
+    await runMutation(() =>
+      operation.start(() => adapter.setSuppression(input), onComplete),
+    );
   }
 
   async function retry() {
-    if (lock.current) return;
-    lock.current = true;
-    setLocked(true);
-    try {
-      await operation.retry();
-    } finally {
-      lock.current = false;
-      setLocked(false);
-    }
+    await runMutation(operation.retry);
   }
 
   return (
@@ -102,7 +89,7 @@ function SuppressionRow({
             type="checkbox"
             aria-label={`Select ${contactLabel(item)} ${item.channel}`}
             checked={selected}
-            disabled={selectionDisabled}
+            disabled={mutationLocked}
             onChange={(event) => onSelect(event.target.checked)}
           />
         </td>
@@ -114,7 +101,7 @@ function SuppressionRow({
         {allowed ? (
           <input
             aria-label={`Reason for ${contactLabel(item)} ${item.channel}`}
-            disabled={locked}
+            disabled={mutationLocked}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
@@ -126,7 +113,7 @@ function SuppressionRow({
         {allowed ? (
           <input
             aria-label={`Source for ${contactLabel(item)} ${item.channel}`}
-            disabled={locked}
+            disabled={mutationLocked}
             value={source}
             onChange={(event) => setSource(event.target.value)}
           />
@@ -136,10 +123,14 @@ function SuppressionRow({
       </td>
       {allowed && (
         <td>
-          <button type="button" disabled={locked} onClick={() => void setSuppression()}>
+          <button
+            type="button"
+            disabled={mutationLocked}
+            onClick={() => void setSuppression()}
+          >
             {item.suppressed ? "Allow" : "Suppress"} {item.channel}
           </button>
-          {operation.error && (
+          {operation.error && !mutationLocked && (
             <ErrorNotice
               error={operation.error}
               retryLabel={`Retry setting ${item.channel} suppression`}
@@ -167,9 +158,9 @@ export function SuppressionScreen({
   const [bulkSource, setBulkSource] = useState("manual");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
-  const [bulkLocked, setBulkLocked] = useState(false);
+  const [mutationLocked, setMutationLocked] = useState(false);
   const request = useRef(0);
-  const bulkLock = useRef(false);
+  const mutationLock = useRef(false);
   const queryKey = JSON.stringify(query);
   const bulkInput = {
     contactIds: selected,
@@ -220,12 +211,12 @@ export function SuppressionScreen({
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
-    if (bulkLock.current) return;
+    if (mutationLock.current) return;
     setQuery((current) => ({ ...current, search: search.trim() || undefined, offset: 0 }));
   }
 
   function select(id: string, channel: SuppressionChannel, checked: boolean) {
-    if (bulkLock.current) return;
+    if (mutationLock.current) return;
     if (!checked) {
       setSelected((current) => current.filter((item) => item !== id));
       return;
@@ -243,32 +234,32 @@ export function SuppressionScreen({
       !capabilities.update ||
       !capabilities.bulkActions ||
       !selected.length ||
-      bulkLock.current
+      mutationLock.current
     )
       return;
     const input = { ...bulkInput, contactIds: [...bulkInput.contactIds] };
-    bulkLock.current = true;
-    setBulkLocked(true);
-    try {
-      await bulkOperation.start(() => adapter.bulkSetSuppression(input), () => {
+    await runMutation(() =>
+      bulkOperation.start(() => adapter.bulkSetSuppression(input), () => {
         setSelected([]);
         void load();
-      });
-    } finally {
-      bulkLock.current = false;
-      setBulkLocked(false);
-    }
+      }),
+    );
   }
 
   async function retryBulk() {
-    if (bulkLock.current) return;
-    bulkLock.current = true;
-    setBulkLocked(true);
+    await runMutation(bulkOperation.retry);
+  }
+
+  async function runMutation(attempt: () => Promise<unknown>): Promise<boolean> {
+    if (mutationLock.current) return false;
+    mutationLock.current = true;
+    setMutationLocked(true);
     try {
-      await bulkOperation.retry();
+      await attempt();
+      return true;
     } finally {
-      bulkLock.current = false;
-      setBulkLocked(false);
+      mutationLock.current = false;
+      setMutationLocked(false);
     }
   }
 
@@ -282,19 +273,19 @@ export function SuppressionScreen({
           Search suppression
           <input
             type="search"
-            disabled={bulkLocked}
+            disabled={mutationLocked}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
         </label>
-        <button type="submit" disabled={bulkLocked}>
+        <button type="submit" disabled={mutationLocked}>
           Search
         </button>
       </form>
       <label>
         Channel
         <select
-          disabled={bulkLocked}
+          disabled={mutationLocked}
           value={query.channel ?? ""}
           onChange={(event) =>
             setQuery((current) => ({
@@ -315,7 +306,7 @@ export function SuppressionScreen({
       <label>
         State
         <select
-          disabled={bulkLocked}
+          disabled={mutationLocked}
           value={query.suppressed === undefined ? "" : String(query.suppressed)}
           onChange={(event) =>
             setQuery((current) => ({
@@ -337,7 +328,7 @@ export function SuppressionScreen({
           <label>
             Bulk channel
             <select
-              disabled={bulkLocked}
+              disabled={mutationLocked}
               value={bulkChannel}
               onChange={(event) => {
                 setBulkChannel(event.target.value as SuppressionChannel);
@@ -354,7 +345,7 @@ export function SuppressionScreen({
           <label>
             Bulk state
             <select
-              disabled={bulkLocked}
+              disabled={mutationLocked}
               value={String(bulkSuppressed)}
               onChange={(event) => setBulkSuppressed(event.target.value === "true")}
             >
@@ -365,7 +356,7 @@ export function SuppressionScreen({
           <label>
             Bulk reason
             <input
-              disabled={bulkLocked}
+              disabled={mutationLocked}
               value={bulkReason}
               onChange={(event) => setBulkReason(event.target.value)}
             />
@@ -373,19 +364,19 @@ export function SuppressionScreen({
           <label>
             Bulk source
             <input
-              disabled={bulkLocked}
+              disabled={mutationLocked}
               value={bulkSource}
               onChange={(event) => setBulkSource(event.target.value)}
             />
           </label>
           <button
             type="button"
-            disabled={!selected.length || bulkLocked}
+            disabled={!selected.length || mutationLocked}
             onClick={() => void bulkSet()}
           >
             Set selected suppression
           </button>
-          {bulkOperation.error && (
+          {bulkOperation.error && !mutationLocked && (
             <ErrorNotice
               error={bulkOperation.error}
               retryLabel="Retry setting selected suppression"
@@ -425,12 +416,13 @@ export function SuppressionScreen({
                 item={item}
                 allowed={capabilities.update}
                 selectable={canBulk}
-                selectionDisabled={bulkLocked}
+                mutationLocked={mutationLocked}
                 selected={
                   item.channel === bulkChannel && selected.includes(item.contact_id)
                 }
                 onSelect={(checked) => select(item.contact_id, item.channel, checked)}
                 onComplete={() => void load()}
+                runMutation={runMutation}
               />
             ))}
           </tbody>
@@ -441,7 +433,7 @@ export function SuppressionScreen({
         <nav aria-label="Suppression pages">
           <button
             type="button"
-            disabled={bulkLocked || query.offset === 0}
+            disabled={mutationLocked || query.offset === 0}
             onClick={() =>
               setQuery((current) => ({
                 ...current,
@@ -453,7 +445,7 @@ export function SuppressionScreen({
           </button>
           <button
             type="button"
-            disabled={bulkLocked || query.offset + query.limit >= page.total}
+            disabled={mutationLocked || query.offset + query.limit >= page.total}
             onClick={() =>
               setQuery((current) => ({ ...current, offset: current.offset + current.limit }))
             }

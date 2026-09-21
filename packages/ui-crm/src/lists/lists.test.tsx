@@ -366,6 +366,50 @@ describe("ListsScreen", () => {
     expect(screen.getByLabelText("Edit list name")).toBeEnabled();
     expect(screen.getByRole("button", { name: "Cancel editing" })).toBeEnabled();
   });
+
+  it("serializes deletes across targets and query changes with an exact retry", async () => {
+    const pendingDelete = deferred<CrmUiResult<void>>();
+    const deleteList = vi
+      .fn<Parameters<ListsAdapter["deleteList"]>, ReturnType<ListsAdapter["deleteList"]>>()
+      .mockReturnValueOnce(pendingDelete.promise)
+      .mockResolvedValue(ok(undefined));
+    const listLists = vi.fn(async () =>
+      ok({ items: [list, listTwo], total: 45, limit: 20, offset: 0 }),
+    );
+    const source = listAdapter({ deleteList, listLists });
+    const user = userEvent.setup();
+    render(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    await screen.findByRole("button", { name: "Customers" });
+    await user.click(screen.getByRole("button", { name: "Delete Customers" }));
+    await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+
+    expect(screen.getByRole("button", { name: "Delete Customers" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete Prospects" })).toBeDisabled();
+    expect(screen.getByLabelText("Search lists")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Delete Prospects" }));
+    await user.type(screen.getByLabelText("Search lists"), "other");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(deleteList).toHaveBeenCalledTimes(1);
+    expect(listLists).toHaveBeenCalledTimes(1);
+
+    await act(async () => pendingDelete.resolve(failure<void>()));
+    expect(await screen.findByRole("button", { name: "Retry deleting list" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete Prospects" })).toBeEnabled();
+    expect(screen.getByLabelText("Search lists")).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Retry deleting list" }));
+    await waitFor(() => expect(deleteList).toHaveBeenCalledTimes(2));
+    expect(deleteList).toHaveBeenNthCalledWith(1, "list-1");
+    expect(deleteList).toHaveBeenNthCalledWith(2, "list-1");
+  });
 });
 
 describe("ListDetailScreen", () => {
