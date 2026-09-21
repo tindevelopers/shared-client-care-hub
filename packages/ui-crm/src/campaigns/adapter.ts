@@ -5,6 +5,7 @@ import type {
   AudienceSourceExtension,
   CampaignChannelExtension,
 } from "../core/provider-extensions.js";
+import type { JsonValue } from "../core/provider-extensions.js";
 import type { CrmUiResult } from "../core/result.js";
 import type {
   AudiencePreviewVm,
@@ -48,10 +49,13 @@ export interface CampaignsScreenProps {
   navigation: CrmNavigation;
   className?: string;
 }
-export interface CampaignWizardScreenProps extends CampaignsScreenProps {
+export interface CampaignWizardScreenProps<
+  TAudienceConfig extends JsonValue = JsonValue,
+  TChannelConfig extends JsonValue = JsonValue,
+> extends CampaignsScreenProps {
   campaignId?: string;
-  audienceExtensions?: AudienceSourceExtension[];
-  channelExtensions?: CampaignChannelExtension[];
+  audienceExtensions?: AudienceSourceExtension<TAudienceConfig>[];
+  channelExtensions?: CampaignChannelExtension<TChannelConfig>[];
 }
 export interface CampaignDetailScreenProps extends CampaignsScreenProps {
   campaignId: string;

@@ -124,6 +124,10 @@ export function CampaignDetailScreen({
             <dt>Type</dt><dd>{visible.campaign_type}</dd>
             <dt>Description</dt><dd>{visible.description ?? "—"}</dd>
           </dl>
+          {capabilities.update && (
+            <button type="button" disabled={writeLocked}
+              onClick={() => navigation.editCampaign(visible.id)}>Edit campaign</button>
+          )}
           <button type="button" disabled={writeLocked}
             onClick={() => navigation.recipients(visible.id)}>Recipients</button>
           <button type="button" disabled={writeLocked}

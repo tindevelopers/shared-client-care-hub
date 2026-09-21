@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { safeAdapterCall } from "../contacts/adapterError.js";
 import { ErrorNotice } from "../contacts/ErrorNotice.js";
+import { ExtensionPanelBoundary } from "../core/ExtensionPanelBoundary.js";
 import type { JsonValue } from "../core/provider-extensions.js";
 import type { CrmUiError } from "../core/result.js";
 import type { CampaignAnalyticsScreenProps } from "./adapter.js";
@@ -56,7 +57,9 @@ export function CampaignAnalyticsScreen({
           </table>
           {analyticsExtensions.map(({ id, label, Panel }) => (
             <section key={id} aria-label={label}>
-              <Panel campaignId={campaignId} data={stats as unknown as JsonValue} />
+              <ExtensionPanelBoundary key={`${campaignId}:${id}`} resetKey={JSON.stringify(stats)}>
+                <Panel campaignId={campaignId} data={stats as unknown as JsonValue} />
+              </ExtensionPanelBoundary>
             </section>
           ))}
         </>

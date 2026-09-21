@@ -4,6 +4,7 @@ import { safeAdapterCall } from "../contacts/adapterError.js";
 import { ErrorNotice } from "../contacts/ErrorNotice.js";
 import { useCrmOperation } from "../contacts/useCrmOperation.js";
 import { useIsomorphicLayoutEffect } from "../contacts/useIsomorphicLayoutEffect.js";
+import { ExtensionPanelBoundary } from "../core/ExtensionPanelBoundary.js";
 import type {
   AudienceSourceExtension,
   CampaignChannelExtension,
@@ -22,16 +23,17 @@ const EXTENSION_ERROR: CrmUiError = {
 
 type AudienceType = CampaignAudience["type"];
 
-function configFor(
-  configs: Record<string, JsonValue>,
-  extension: AudienceSourceExtension | CampaignChannelExtension,
-): JsonValue {
-  return configs[extension.id] ?? extension.initialValue ?? null;
+function configFor<TConfig extends JsonValue>(
+  configs: Partial<Record<string, TConfig>>,
+  extension: AudienceSourceExtension<TConfig> | CampaignChannelExtension<TConfig>,
+): TConfig {
+  if (Object.hasOwn(configs, extension.id)) return configs[extension.id] as TConfig;
+  return (extension.initialValue ?? null) as TConfig;
 }
 
-function extensionValue(
-  extension: AudienceSourceExtension | CampaignChannelExtension,
-  value: JsonValue,
+function extensionValue<TConfig extends JsonValue>(
+  extension: AudienceSourceExtension<TConfig> | CampaignChannelExtension<TConfig>,
+  value: TConfig,
 ): CrmUiResult<JsonValue> {
   try {
     const validated = extension.validate(value);
@@ -42,7 +44,10 @@ function extensionValue(
   }
 }
 
-export function CampaignWizardScreen({
+export function CampaignWizardScreen<
+  TAudienceConfig extends JsonValue = JsonValue,
+  TChannelConfig extends JsonValue = JsonValue,
+>({
   adapter,
   capabilities,
   navigation,
@@ -50,18 +55,29 @@ export function CampaignWizardScreen({
   audienceExtensions = [],
   channelExtensions = [],
   className,
-}: CampaignWizardScreenProps) {
+}: CampaignWizardScreenProps<TAudienceConfig, TChannelConfig>) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<CampaignType>("email");
+  const [scheduleStart, setScheduleStart] = useState("");
+  const [scheduleEnd, setScheduleEnd] = useState("");
+  const [callingWindowStart, setCallingWindowStart] = useState("");
+  const [callingWindowEnd, setCallingWindowEnd] = useState("");
+  const [callingDays, setCallingDays] = useState("");
+  const [timezone, setTimezone] = useState("");
+  const [messageTemplate, setMessageTemplate] = useState("");
   const [audienceType, setAudienceType] = useState<AudienceType>("all_contacts");
   const [listId, setListId] = useState("");
   const [tag, setTag] = useState("");
   const [contactIds, setContactIds] = useState("");
   const [audienceExtensionId, setAudienceExtensionId] = useState("");
   const [channelExtensionId, setChannelExtensionId] = useState("");
-  const [audienceConfigs, setAudienceConfigs] = useState<Record<string, JsonValue>>({});
-  const [channelConfigs, setChannelConfigs] = useState<Record<string, JsonValue>>({});
+  const [audienceConfigs, setAudienceConfigs] =
+    useState<Partial<Record<string, TAudienceConfig>>>({});
+  const [channelConfigs, setChannelConfigs] =
+    useState<Partial<Record<string, TChannelConfig>>>({});
+  const [audienceDirty, setAudienceDirty] = useState(!campaignId);
+  const [extensionsDirty, setExtensionsDirty] = useState(false);
   const [loadedCampaignId, setLoadedCampaignId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [extensionError, setExtensionError] = useState<CrmUiError | null>(null);
@@ -84,6 +100,12 @@ export function CampaignWizardScreen({
       contactIds: contactIds.split(",").map((id) => id.trim()).filter(Boolean),
     } : { type: "all_contacts" };
   const audienceKey = JSON.stringify(audience);
+  const audienceConfig = audienceExtension
+    ? configFor(audienceConfigs, audienceExtension)
+    : null;
+  const channelConfig = channelExtension
+    ? configFor(channelConfigs, channelExtension)
+    : null;
   const audienceReady =
     (audience.type !== "list" || Boolean(audience.listId)) &&
     (audience.type !== "tag" || Boolean(audience.tag)) &&
@@ -92,12 +114,11 @@ export function CampaignWizardScreen({
   const scope = JSON.stringify({
     campaignId: campaignId ?? null,
     allowed: campaignId ? capabilities.update : capabilities.create,
-    name, description, type, audience,
+    name, description, type, scheduleStart, scheduleEnd,
+    callingWindowStart, callingWindowEnd, callingDays, timezone, messageTemplate,
+    audience: audienceDirty ? audience : null,
     audienceExtensionId, channelExtensionId,
-    audienceConfig: audienceExtension
-      ? configFor(audienceConfigs, audienceExtension) : null,
-    channelConfig: channelExtension
-      ? configFor(channelConfigs, channelExtension) : null,
+    audienceConfig, channelConfig, extensionsDirty,
   });
   const operation = useCrmOperation(scope);
 
@@ -116,6 +137,13 @@ export function CampaignWizardScreen({
       setName(result.data.name);
       setDescription(result.data.description ?? "");
       setType(result.data.campaign_type);
+      setScheduleStart(result.data.schedule_start ?? "");
+      setScheduleEnd(result.data.schedule_end ?? "");
+      setCallingWindowStart(result.data.calling_window_start ?? "");
+      setCallingWindowEnd(result.data.calling_window_end ?? "");
+      setCallingDays(result.data.calling_days?.join(", ") ?? "");
+      setTimezone(result.data.timezone ?? "");
+      setMessageTemplate(result.data.message_template ?? "");
       setLoadedCampaignId(campaignId);
     }
   }, [adapter, campaignId]);
@@ -138,6 +166,24 @@ export function CampaignWizardScreen({
     }
   }, [channelExtensionId, channelExtensions]);
   useIsomorphicLayoutEffect(() => {
+    setAudienceDirty(!campaignId);
+    setExtensionsDirty(false);
+    setAudienceExtensionId("");
+    setChannelExtensionId("");
+    setAudienceConfigs({});
+    setChannelConfigs({});
+    setExtensionError(null);
+  }, [campaignId]);
+  useIsomorphicLayoutEffect(() => {
+    setExtensionError(null);
+  }, [
+    campaignId,
+    audienceExtensionId,
+    channelExtensionId,
+    JSON.stringify(audienceConfig),
+    JSON.stringify(channelConfig),
+  ]);
+  useIsomorphicLayoutEffect(() => {
     previewRequest.current += 1;
     setPreview(null);
     setPreviewError(null);
@@ -157,14 +203,14 @@ export function CampaignWizardScreen({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!allowed || !name.trim() || writeLock.current) return;
-    if (!audienceReady) return;
+    if (audienceDirty && !audienceReady) return;
 
     setExtensionError(null);
     const settings: Record<string, JsonValue> = {};
-    if (audienceExtension) {
+    if (extensionsDirty && audienceExtension) {
       const value = extensionValue(
         audienceExtension,
-        configFor(audienceConfigs, audienceExtension),
+        audienceConfig as TAudienceConfig,
       );
       if (!value.ok) {
         setExtensionError(value.error);
@@ -172,10 +218,10 @@ export function CampaignWizardScreen({
       }
       settings.audienceExtension = { id: audienceExtension.id, config: value.data };
     }
-    if (channelExtension) {
+    if (extensionsDirty && channelExtension) {
       const value = extensionValue(
         channelExtension,
-        configFor(channelConfigs, channelExtension),
+        channelConfig as TChannelConfig,
       );
       if (!value.ok) {
         setExtensionError(value.error);
@@ -188,7 +234,19 @@ export function CampaignWizardScreen({
       name: name.trim(),
       campaign_type: type,
       description: description.trim() || null,
-      settings: Object.keys(settings).length ? settings : null,
+      schedule_start: scheduleStart.trim() || null,
+      schedule_end: scheduleEnd.trim() || null,
+      calling_window_start: callingWindowStart.trim() || null,
+      calling_window_end: callingWindowEnd.trim() || null,
+      calling_days: callingDays.trim()
+        ? callingDays.split(",").map((day) => Number(day.trim()))
+          .filter((day) => Number.isInteger(day))
+        : null,
+      timezone: timezone.trim() || null,
+      message_template: messageTemplate.trim() || null,
+      ...(extensionsDirty
+        ? { settings: Object.keys(settings).length ? settings : null }
+        : {}),
     };
     const selectedAudience = audience;
     let savedId = campaignId;
@@ -206,8 +264,10 @@ export function CampaignWizardScreen({
         saved = true;
       }
       const targetId = savedId as string;
-      const audienceResult = await adapter.replaceAudience(targetId, selectedAudience);
-      if (!audienceResult.ok) return audienceResult;
+      if (audienceDirty) {
+        const audienceResult = await adapter.replaceAudience(targetId, selectedAudience);
+        if (!audienceResult.ok) return audienceResult;
+      }
       return { ok: true, data: { id: targetId } };
     };
 
@@ -259,12 +319,50 @@ export function CampaignWizardScreen({
             {CAMPAIGN_TYPES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>
+        <label>
+          Schedule start
+          <input disabled={writeLocked} value={scheduleStart}
+            onChange={(event) => setScheduleStart(event.target.value)} />
+        </label>
+        <label>
+          Schedule end
+          <input disabled={writeLocked} value={scheduleEnd}
+            onChange={(event) => setScheduleEnd(event.target.value)} />
+        </label>
+        <label>
+          Calling window start
+          <input disabled={writeLocked} value={callingWindowStart}
+            onChange={(event) => setCallingWindowStart(event.target.value)} />
+        </label>
+        <label>
+          Calling window end
+          <input disabled={writeLocked} value={callingWindowEnd}
+            onChange={(event) => setCallingWindowEnd(event.target.value)} />
+        </label>
+        <label>
+          Calling days
+          <input disabled={writeLocked} value={callingDays}
+            onChange={(event) => setCallingDays(event.target.value)} />
+        </label>
+        <label>
+          Timezone
+          <input disabled={writeLocked} value={timezone}
+            onChange={(event) => setTimezone(event.target.value)} />
+        </label>
+        <label>
+          Message template
+          <textarea disabled={writeLocked} value={messageTemplate}
+            onChange={(event) => setMessageTemplate(event.target.value)} />
+        </label>
         <fieldset disabled={writeLocked}>
           <legend>Audience</legend>
           <label>
             Audience type
             <select value={audienceType}
-              onChange={(event) => setAudienceType(event.target.value as AudienceType)}>
+              onChange={(event) => {
+                setAudienceType(event.target.value as AudienceType);
+                setAudienceDirty(true);
+              }}>
               <option value="all_contacts">All contacts</option>
               <option value="list">List</option>
               <option value="tag">Tag</option>
@@ -272,27 +370,57 @@ export function CampaignWizardScreen({
             </select>
           </label>
           {audienceType === "list" && <label>Audience list
-            <input value={listId} onChange={(event) => setListId(event.target.value)} />
+            <input value={listId} onChange={(event) => {
+              setListId(event.target.value);
+              setAudienceDirty(true);
+            }} />
           </label>}
           {audienceType === "tag" && <label>Audience tag
-            <input value={tag} onChange={(event) => setTag(event.target.value)} />
+            <input value={tag} onChange={(event) => {
+              setTag(event.target.value);
+              setAudienceDirty(true);
+            }} />
           </label>}
           {audienceType === "contacts" && <label>Contact IDs
-            <input value={contactIds} onChange={(event) => setContactIds(event.target.value)} />
+            <input value={contactIds} onChange={(event) => {
+              setContactIds(event.target.value);
+              setAudienceDirty(true);
+            }} />
           </label>}
         </fieldset>
         <button type="button" disabled={writeLocked || !audienceReady}
           onClick={() => void previewAudience()}>
           Preview audience
         </button>
-        {preview && <p role="status">{preview.total} contacts</p>}
+        {preview && (
+          <section aria-label="Audience preview">
+            <p role="status">{preview.total} contacts</p>
+            {preview.sample.length > 0 && (
+              <table>
+                <thead><tr>
+                  <th scope="col">Name</th><th scope="col">Email</th><th scope="col">Phone</th>
+                </tr></thead>
+                <tbody>{preview.sample.map((contact) => (
+                  <tr key={contact.id}>
+                    <th scope="row">{contact.first_name} {contact.last_name}</th>
+                    <td>{contact.email ?? "—"}</td>
+                    <td>{contact.phone ?? contact.mobile ?? "—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </section>
+        )}
         {previewError && <ErrorNotice error={previewError}
           retryLabel="Retry previewing audience" onRetry={() => void previewAudience()} />}
         {audienceExtensions.length > 0 && (
           <label>
             Audience configuration
             <select disabled={writeLocked} value={audienceExtensionId}
-              onChange={(event) => setAudienceExtensionId(event.target.value)}>
+              onChange={(event) => {
+                setAudienceExtensionId(event.target.value);
+                setExtensionsDirty(true);
+              }}>
               <option value="">None</option>
               {audienceExtensions.map((extension) =>
                 <option key={extension.id} value={extension.id}>{extension.label}</option>)}
@@ -300,17 +428,29 @@ export function CampaignWizardScreen({
           </label>
         )}
         {audienceExtension && AudiencePanel && (
-          <AudiencePanel disabled={writeLocked}
-            value={configFor(audienceConfigs, audienceExtension)}
-            onChange={(value) => setAudienceConfigs((current) => ({
-              ...current, [audienceExtension.id]: value,
-            }))} />
+          <ExtensionPanelBoundary
+            key={`${campaignId ?? "new"}:audience:${audienceExtension.id}`}
+            resetKey={JSON.stringify(audienceConfig)}
+          >
+            <AudiencePanel disabled={writeLocked}
+              value={audienceConfig as TAudienceConfig}
+              onChange={(value) => {
+                if (writeLock.current) return;
+                setAudienceConfigs((current) => ({
+                  ...current, [audienceExtension.id]: value,
+                }));
+                setExtensionsDirty(true);
+              }} />
+          </ExtensionPanelBoundary>
         )}
         {channelExtensions.length > 0 && (
           <label>
             Channel configuration
             <select disabled={writeLocked} value={channelExtensionId}
-              onChange={(event) => setChannelExtensionId(event.target.value)}>
+              onChange={(event) => {
+                setChannelExtensionId(event.target.value);
+                setExtensionsDirty(true);
+              }}>
               <option value="">None</option>
               {channelExtensions.map((extension) =>
                 <option key={extension.id} value={extension.id}>{extension.label}</option>)}
@@ -318,11 +458,20 @@ export function CampaignWizardScreen({
           </label>
         )}
         {channelExtension && ChannelPanel && (
-          <ChannelPanel disabled={writeLocked}
-            value={configFor(channelConfigs, channelExtension)}
-            onChange={(value) => setChannelConfigs((current) => ({
-              ...current, [channelExtension.id]: value,
-            }))} />
+          <ExtensionPanelBoundary
+            key={`${campaignId ?? "new"}:channel:${channelExtension.id}`}
+            resetKey={JSON.stringify(channelConfig)}
+          >
+            <ChannelPanel disabled={writeLocked}
+              value={channelConfig as TChannelConfig}
+              onChange={(value) => {
+                if (writeLock.current) return;
+                setChannelConfigs((current) => ({
+                  ...current, [channelExtension.id]: value,
+                }));
+                setExtensionsDirty(true);
+              }} />
+          </ExtensionPanelBoundary>
         )}
         <button type="submit" disabled={writeLocked || !allowed}>
           {campaignId ? "Save campaign" : "Create campaign"}

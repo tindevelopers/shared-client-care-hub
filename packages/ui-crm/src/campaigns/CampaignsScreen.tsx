@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import type { CampaignStatus, CampaignType } from "@tindevelopers/schema-crm";
 import { safeAdapterCall } from "../contacts/adapterError.js";
 import { ErrorNotice } from "../contacts/ErrorNotice.js";
 import type { CrmUiError } from "../core/result.js";
@@ -6,6 +7,10 @@ import type { CampaignsScreenProps } from "./adapter.js";
 import type { CampaignPage, CampaignQuery } from "./types.js";
 
 const PAGE_SIZE = 20;
+const STATUSES: CampaignStatus[] = [
+  "draft", "scheduled", "running", "paused", "completed", "cancelled", "sent",
+];
+const TYPES: CampaignType[] = ["voice", "sms", "whatsapp", "multi_channel", "email"];
 
 export function CampaignsScreen({
   adapter,
@@ -62,6 +67,28 @@ export function CampaignsScreen({
         </label>
         <button type="submit">Search</button>
       </form>
+      <label>
+        Campaign status
+        <select value={query.status ?? ""} onChange={(event) => setQuery((current) => ({
+          ...current,
+          status: (event.target.value || undefined) as CampaignStatus | undefined,
+          offset: 0,
+        }))}>
+          <option value="">All statuses</option>
+          {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+        </select>
+      </label>
+      <label>
+        Campaign type
+        <select value={query.type ?? ""} onChange={(event) => setQuery((current) => ({
+          ...current,
+          type: (event.target.value || undefined) as CampaignType | undefined,
+          offset: 0,
+        }))}>
+          <option value="">All types</option>
+          {TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        </select>
+      </label>
       {loading && <p role="status">Loading campaigns…</p>}
       {error && <ErrorNotice error={error} retryLabel="Retry loading campaigns"
         onRetry={() => void load()} />}
