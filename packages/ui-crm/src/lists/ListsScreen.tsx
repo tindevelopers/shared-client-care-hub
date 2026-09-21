@@ -55,7 +55,11 @@ export function ListsScreen({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
+  const [createLocked, setCreateLocked] = useState(false);
+  const [editLocked, setEditLocked] = useState(false);
   const request = useRef(0);
+  const createLock = useRef(false);
+  const editLock = useRef(false);
   const queryKey = JSON.stringify(query);
   const createPayload = normalizeInput(draft);
   const editPayload = editing ? normalizePatch(editing) : null;
@@ -120,26 +124,64 @@ export function ListsScreen({
   async function create(event: FormEvent) {
     event.preventDefault();
     const input = createPayload;
-    if (!input.name || !capabilities.create) return;
-    await createOperation.start(() => adapter.createList(input), () => {
-      setDraft(emptyInput());
-      void load();
-    });
+    if (!input.name || !capabilities.create || createLock.current) return;
+    createLock.current = true;
+    setCreateLocked(true);
+    try {
+      await createOperation.start(() => adapter.createList(input), () => {
+        setDraft(emptyInput());
+        void load();
+      });
+    } finally {
+      createLock.current = false;
+      setCreateLocked(false);
+    }
   }
 
   async function update(event: FormEvent) {
     event.preventDefault();
-    if (!editing || !capabilities.update) return;
+    if (!editing || !capabilities.update || editLock.current) return;
     const target = editing;
     const patch = editPayload;
     if (!patch?.name) return;
-    await editOperation.start(
-      () => adapter.updateList(target.id, patch),
-      () => {
-        setEditing(null);
-        void load();
-      },
-    );
+    editLock.current = true;
+    setEditLocked(true);
+    try {
+      await editOperation.start(
+        () => adapter.updateList(target.id, patch),
+        () => {
+          setEditing(null);
+          void load();
+        },
+      );
+    } finally {
+      editLock.current = false;
+      setEditLocked(false);
+    }
+  }
+
+  async function retryCreate() {
+    if (createLock.current) return;
+    createLock.current = true;
+    setCreateLocked(true);
+    try {
+      await createOperation.retry();
+    } finally {
+      createLock.current = false;
+      setCreateLocked(false);
+    }
+  }
+
+  async function retryEdit() {
+    if (editLock.current) return;
+    editLock.current = true;
+    setEditLocked(true);
+    try {
+      await editOperation.retry();
+    } finally {
+      editLock.current = false;
+      setEditLocked(false);
+    }
   }
 
   async function remove() {
@@ -173,6 +215,7 @@ export function ListsScreen({
                 createOperation.error?.code === "duplicate_name" ? "create-list-error" : undefined
               }
               aria-invalid={createOperation.error?.code === "duplicate_name" || undefined}
+              disabled={createLocked}
               value={draft.name}
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
               required
@@ -181,6 +224,7 @@ export function ListsScreen({
           <label>
             Description
             <input
+              disabled={createLocked}
               value={draft.description ?? ""}
               onChange={(event) =>
                 setDraft((current) => ({
@@ -190,7 +234,7 @@ export function ListsScreen({
               }
             />
           </label>
-          <button type="submit" disabled={createOperation.pending}>
+          <button type="submit" disabled={createLocked}>
             Create list
           </button>
           {createOperation.error && (
@@ -198,7 +242,7 @@ export function ListsScreen({
               <ErrorNotice
                 error={createOperation.error}
                 retryLabel="Retry creating list"
-                onRetry={createOperation.retry}
+                onRetry={() => void retryCreate()}
               />
             </div>
           )}
@@ -219,7 +263,11 @@ export function ListsScreen({
               </button>
               <span>{item.memberCount} members</span>
               {capabilities.update && (
-                <button type="button" onClick={() => setEditing(item)}>
+                <button
+                  type="button"
+                  disabled={editLocked}
+                  onClick={() => setEditing(item)}
+                >
                   Edit {item.name}
                 </button>
               )}
@@ -249,6 +297,7 @@ export function ListsScreen({
                 editOperation.error?.code === "duplicate_name" ? "edit-list-error" : undefined
               }
               aria-invalid={editOperation.error?.code === "duplicate_name" || undefined}
+              disabled={editLocked}
               value={editing.name}
               onChange={(event) =>
                 setEditing((current) => (current ? { ...current, name: event.target.value } : null))
@@ -259,6 +308,7 @@ export function ListsScreen({
           <label>
             Edit description
             <input
+              disabled={editLocked}
               value={editing.description ?? ""}
               onChange={(event) =>
                 setEditing((current) =>
@@ -267,10 +317,14 @@ export function ListsScreen({
               }
             />
           </label>
-          <button type="button" onClick={() => setEditing(null)}>
+          <button
+            type="button"
+            disabled={editLocked}
+            onClick={() => setEditing(null)}
+          >
             Cancel editing
           </button>
-          <button type="submit" disabled={editOperation.pending}>
+          <button type="submit" disabled={editLocked}>
             Save list
           </button>
           {editOperation.error && (
@@ -278,7 +332,7 @@ export function ListsScreen({
               <ErrorNotice
                 error={editOperation.error}
                 retryLabel="Retry updating list"
-                onRetry={editOperation.retry}
+                onRetry={() => void retryEdit()}
               />
             </div>
           )}

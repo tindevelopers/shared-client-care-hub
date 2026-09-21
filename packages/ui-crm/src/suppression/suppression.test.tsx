@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CrmCapabilities, CrmUiResult } from "../index";
@@ -55,6 +55,14 @@ function ok<T>(data: T): CrmUiResult<T> {
 
 function failure<T = never>(message = "Try again"): CrmUiResult<T> {
   return { ok: false, error: { code: "temporary", message, retryable: true } };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 function page(total = 3): ContactSuppressionPage {
@@ -288,5 +296,77 @@ describe("SuppressionScreen", () => {
     expect(screen.queryByRole("button", { name: /Retry setting/ })).not.toBeInTheDocument();
     view.rerender(<SuppressionScreen adapter={source} capabilities={capabilities} />);
     expect(screen.queryByRole("button", { name: /Retry setting/ })).not.toBeInTheDocument();
+  });
+
+  it("locks single-row payload controls while the write is pending", async () => {
+    const result = deferred<CrmUiResult<void>>();
+    const setSuppression = vi
+      .fn<Parameters<SuppressionAdapter["setSuppression"]>, ReturnType<SuppressionAdapter["setSuppression"]>>()
+      .mockReturnValue(result.promise);
+    const user = userEvent.setup();
+    render(
+      <SuppressionScreen
+        adapter={adapter({ setSuppression })}
+        capabilities={capabilities}
+      />,
+    );
+    await screen.findByRole("cell", { name: "email" });
+    const reason = screen.getByLabelText("Reason for Ada Lovelace email");
+    const source = screen.getByLabelText("Source for Ada Lovelace email");
+    const action = screen.getByRole("button", { name: "Allow email" });
+    await user.click(action);
+    expect(reason).toBeDisabled();
+    expect(source).toBeDisabled();
+    expect(action).toBeDisabled();
+    await user.type(reason, " changed");
+    await user.click(action);
+    expect(setSuppression).toHaveBeenCalledTimes(1);
+
+    await act(async () => result.resolve(failure<void>()));
+    expect(
+      await screen.findByRole("button", { name: "Retry setting email suppression" }),
+    ).toBeInTheDocument();
+    expect(reason).toBeEnabled();
+    expect(source).toBeEnabled();
+    expect(action).toBeEnabled();
+  });
+
+  it("locks bulk payload, selection, and query controls while the write is pending", async () => {
+    const result = deferred<CrmUiResult<{ updated: number }>>();
+    const bulkSetSuppression = vi
+      .fn<Parameters<SuppressionAdapter["bulkSetSuppression"]>, ReturnType<SuppressionAdapter["bulkSetSuppression"]>>()
+      .mockReturnValue(result.promise);
+    const user = userEvent.setup();
+    render(
+      <SuppressionScreen
+        adapter={adapter({ bulkSetSuppression })}
+        capabilities={capabilities}
+      />,
+    );
+    await screen.findByRole("cell", { name: "email" });
+    const selection = screen.getByRole("checkbox", { name: "Select Ada Lovelace email" });
+    await user.click(selection);
+    await user.click(screen.getByRole("button", { name: "Set selected suppression" }));
+
+    expect(selection).toBeDisabled();
+    expect(screen.getByLabelText("Bulk channel")).toBeDisabled();
+    expect(screen.getByLabelText("Bulk state")).toBeDisabled();
+    expect(screen.getByLabelText("Bulk reason")).toBeDisabled();
+    expect(screen.getByLabelText("Bulk source")).toBeDisabled();
+    expect(screen.getByLabelText("Search suppression")).toBeDisabled();
+    expect(screen.getByLabelText("Channel")).toBeDisabled();
+    expect(screen.getByLabelText("State")).toBeDisabled();
+    await user.click(selection);
+    await user.selectOptions(screen.getByLabelText("Bulk channel"), "sms");
+    await user.click(screen.getByRole("button", { name: "Set selected suppression" }));
+    expect(bulkSetSuppression).toHaveBeenCalledTimes(1);
+
+    await act(async () => result.resolve(failure<{ updated: number }>()));
+    expect(
+      await screen.findByRole("button", { name: "Retry setting selected suppression" }),
+    ).toBeInTheDocument();
+    expect(selection).toBeEnabled();
+    expect(screen.getByLabelText("Bulk channel")).toBeEnabled();
+    expect(screen.getByLabelText("Search suppression")).toBeEnabled();
   });
 });

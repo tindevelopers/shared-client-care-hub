@@ -319,6 +319,53 @@ describe("ListsScreen", () => {
     expect(screen.queryByRole("button", { name: "Retry creating list" })).not.toBeInTheDocument();
     expect(createList).toHaveBeenCalledTimes(1);
   });
+
+  it("locks create and edit payload controls while each write is pending", async () => {
+    const createResult = deferred<CrmUiResult<ContactListVm>>();
+    const editResult = deferred<CrmUiResult<void>>();
+    const createList = vi
+      .fn<Parameters<ListsAdapter["createList"]>, ReturnType<ListsAdapter["createList"]>>()
+      .mockReturnValue(createResult.promise);
+    const updateList = vi
+      .fn<Parameters<ListsAdapter["updateList"]>, ReturnType<ListsAdapter["updateList"]>>()
+      .mockReturnValue(editResult.promise);
+    const source = listAdapter({ createList, updateList });
+    const user = userEvent.setup();
+    render(
+      <ListsScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+      />,
+    );
+    await screen.findByRole("button", { name: "Customers" });
+    await user.type(screen.getByLabelText("List name"), "Pending");
+    await user.click(screen.getByRole("button", { name: "Create list" }));
+    expect(screen.getByLabelText("List name")).toBeDisabled();
+    expect(screen.getByLabelText("Description")).toBeDisabled();
+    await user.type(screen.getByLabelText("List name"), " second");
+    await user.click(screen.getByRole("button", { name: "Create list" }));
+    expect(createList).toHaveBeenCalledTimes(1);
+
+    await act(async () => createResult.resolve(failure<ContactListVm>()));
+    expect(await screen.findByRole("button", { name: "Retry creating list" })).toBeInTheDocument();
+    expect(screen.getByLabelText("List name")).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Edit Customers" }));
+    await user.click(screen.getByRole("button", { name: "Save list" }));
+    expect(screen.getByLabelText("Edit list name")).toBeDisabled();
+    expect(screen.getByLabelText("Edit description")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel editing" })).toBeDisabled();
+    await user.type(screen.getByLabelText("Edit description"), " second");
+    await user.click(screen.getByRole("button", { name: "Save list" }));
+    expect(updateList).toHaveBeenCalledTimes(1);
+
+    await act(async () => editResult.resolve(failure<void>()));
+    expect(await screen.findByRole("button", { name: "Retry updating list" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Edit list name")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel editing" })).toBeEnabled();
+  });
 });
 
 describe("ListDetailScreen", () => {
@@ -456,5 +503,58 @@ describe("ListDetailScreen", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select Ada Lovelace for removal" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(source.removeMembers).not.toHaveBeenCalled();
+  });
+
+  it("locks member selections and query controls while mutations are pending", async () => {
+    const addResult = deferred<CrmUiResult<{ added: number }>>();
+    const removeResult = deferred<CrmUiResult<{ removed: number }>>();
+    const addMembers = vi
+      .fn<Parameters<ListsAdapter["addMembers"]>, ReturnType<ListsAdapter["addMembers"]>>()
+      .mockReturnValue(addResult.promise);
+    const removeMembers = vi
+      .fn<Parameters<ListsAdapter["removeMembers"]>, ReturnType<ListsAdapter["removeMembers"]>>()
+      .mockReturnValue(removeResult.promise);
+    const source = listAdapter({ addMembers, removeMembers });
+    const user = userEvent.setup();
+    render(
+      <ListDetailScreen
+        adapter={source}
+        contacts={contacts}
+        capabilities={capabilities}
+        navigation={routes}
+        listId="list-1"
+      />,
+    );
+    await screen.findByRole("heading", { name: "Customers" });
+    const addSelection = screen.getByRole("checkbox", { name: "Select Ada Lovelace to add" });
+    await user.click(addSelection);
+    await user.click(screen.getByRole("button", { name: "Add selected members" }));
+    expect(addSelection).toBeDisabled();
+    expect(screen.getByLabelText("Search contacts")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next contacts" })).toBeDisabled();
+    await user.click(addSelection);
+    await user.click(screen.getByRole("button", { name: "Add selected members" }));
+    expect(addMembers).toHaveBeenCalledTimes(1);
+
+    await act(async () => addResult.resolve(failure<{ added: number }>()));
+    expect(await screen.findByRole("button", { name: "Retry adding members" })).toBeInTheDocument();
+    expect(addSelection).toBeEnabled();
+    expect(screen.getByLabelText("Search contacts")).toBeEnabled();
+
+    const removeSelection = screen.getByRole("checkbox", {
+      name: "Select Ada Lovelace for removal",
+    });
+    await user.click(removeSelection);
+    await user.click(screen.getByRole("button", { name: "Remove selected members" }));
+    await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+    expect(removeSelection).toBeDisabled();
+    await user.click(removeSelection);
+    expect(removeMembers).toHaveBeenCalledTimes(1);
+
+    await act(async () => removeResult.resolve(failure<{ removed: number }>()));
+    expect(
+      await screen.findByRole("button", { name: "Retry removing members" }),
+    ).toBeInTheDocument();
+    expect(removeSelection).toBeEnabled();
   });
 });

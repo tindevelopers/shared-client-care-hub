@@ -25,6 +25,7 @@ interface RowProps {
   item: ContactSuppressionVm;
   allowed: boolean;
   selectable: boolean;
+  selectionDisabled: boolean;
   selected: boolean;
   onSelect(checked: boolean): void;
   onComplete(): void;
@@ -35,12 +36,15 @@ function SuppressionRow({
   item,
   allowed,
   selectable,
+  selectionDisabled,
   selected,
   onSelect,
   onComplete,
 }: RowProps) {
   const [reason, setReason] = useState(item.reason ?? "");
   const [source, setSource] = useState(item.source);
+  const [locked, setLocked] = useState(false);
+  const lock = useRef(false);
   const input: SetSuppressionInput = {
     contact_id: item.contact_id,
     channel: item.channel,
@@ -67,8 +71,27 @@ function SuppressionRow({
   }, [revisionKey]);
 
   async function setSuppression() {
-    if (!allowed) return;
-    await operation.start(() => adapter.setSuppression(input), onComplete);
+    if (!allowed || lock.current) return;
+    lock.current = true;
+    setLocked(true);
+    try {
+      await operation.start(() => adapter.setSuppression(input), onComplete);
+    } finally {
+      lock.current = false;
+      setLocked(false);
+    }
+  }
+
+  async function retry() {
+    if (lock.current) return;
+    lock.current = true;
+    setLocked(true);
+    try {
+      await operation.retry();
+    } finally {
+      lock.current = false;
+      setLocked(false);
+    }
   }
 
   return (
@@ -79,6 +102,7 @@ function SuppressionRow({
             type="checkbox"
             aria-label={`Select ${contactLabel(item)} ${item.channel}`}
             checked={selected}
+            disabled={selectionDisabled}
             onChange={(event) => onSelect(event.target.checked)}
           />
         </td>
@@ -90,6 +114,7 @@ function SuppressionRow({
         {allowed ? (
           <input
             aria-label={`Reason for ${contactLabel(item)} ${item.channel}`}
+            disabled={locked}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
@@ -101,6 +126,7 @@ function SuppressionRow({
         {allowed ? (
           <input
             aria-label={`Source for ${contactLabel(item)} ${item.channel}`}
+            disabled={locked}
             value={source}
             onChange={(event) => setSource(event.target.value)}
           />
@@ -110,14 +136,14 @@ function SuppressionRow({
       </td>
       {allowed && (
         <td>
-          <button type="button" disabled={operation.pending} onClick={() => void setSuppression()}>
+          <button type="button" disabled={locked} onClick={() => void setSuppression()}>
             {item.suppressed ? "Allow" : "Suppress"} {item.channel}
           </button>
           {operation.error && (
             <ErrorNotice
               error={operation.error}
               retryLabel={`Retry setting ${item.channel} suppression`}
-              onRetry={operation.retry}
+              onRetry={() => void retry()}
             />
           )}
         </td>
@@ -141,7 +167,9 @@ export function SuppressionScreen({
   const [bulkSource, setBulkSource] = useState("manual");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
+  const [bulkLocked, setBulkLocked] = useState(false);
   const request = useRef(0);
+  const bulkLock = useRef(false);
   const queryKey = JSON.stringify(query);
   const bulkInput = {
     contactIds: selected,
@@ -192,10 +220,12 @@ export function SuppressionScreen({
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
+    if (bulkLock.current) return;
     setQuery((current) => ({ ...current, search: search.trim() || undefined, offset: 0 }));
   }
 
   function select(id: string, channel: SuppressionChannel, checked: boolean) {
+    if (bulkLock.current) return;
     if (!checked) {
       setSelected((current) => current.filter((item) => item !== id));
       return;
@@ -209,12 +239,37 @@ export function SuppressionScreen({
   }
 
   async function bulkSet() {
-    if (!capabilities.update || !capabilities.bulkActions || !selected.length) return;
+    if (
+      !capabilities.update ||
+      !capabilities.bulkActions ||
+      !selected.length ||
+      bulkLock.current
+    )
+      return;
     const input = { ...bulkInput, contactIds: [...bulkInput.contactIds] };
-    await bulkOperation.start(() => adapter.bulkSetSuppression(input), () => {
-      setSelected([]);
-      void load();
-    });
+    bulkLock.current = true;
+    setBulkLocked(true);
+    try {
+      await bulkOperation.start(() => adapter.bulkSetSuppression(input), () => {
+        setSelected([]);
+        void load();
+      });
+    } finally {
+      bulkLock.current = false;
+      setBulkLocked(false);
+    }
+  }
+
+  async function retryBulk() {
+    if (bulkLock.current) return;
+    bulkLock.current = true;
+    setBulkLocked(true);
+    try {
+      await bulkOperation.retry();
+    } finally {
+      bulkLock.current = false;
+      setBulkLocked(false);
+    }
   }
 
   const canBulk = capabilities.update && capabilities.bulkActions;
@@ -225,13 +280,21 @@ export function SuppressionScreen({
       <form role="search" onSubmit={submitSearch}>
         <label>
           Search suppression
-          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <input
+            type="search"
+            disabled={bulkLocked}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
         </label>
-        <button type="submit">Search</button>
+        <button type="submit" disabled={bulkLocked}>
+          Search
+        </button>
       </form>
       <label>
         Channel
         <select
+          disabled={bulkLocked}
           value={query.channel ?? ""}
           onChange={(event) =>
             setQuery((current) => ({
@@ -252,6 +315,7 @@ export function SuppressionScreen({
       <label>
         State
         <select
+          disabled={bulkLocked}
           value={query.suppressed === undefined ? "" : String(query.suppressed)}
           onChange={(event) =>
             setQuery((current) => ({
@@ -273,6 +337,7 @@ export function SuppressionScreen({
           <label>
             Bulk channel
             <select
+              disabled={bulkLocked}
               value={bulkChannel}
               onChange={(event) => {
                 setBulkChannel(event.target.value as SuppressionChannel);
@@ -289,6 +354,7 @@ export function SuppressionScreen({
           <label>
             Bulk state
             <select
+              disabled={bulkLocked}
               value={String(bulkSuppressed)}
               onChange={(event) => setBulkSuppressed(event.target.value === "true")}
             >
@@ -298,15 +364,23 @@ export function SuppressionScreen({
           </label>
           <label>
             Bulk reason
-            <input value={bulkReason} onChange={(event) => setBulkReason(event.target.value)} />
+            <input
+              disabled={bulkLocked}
+              value={bulkReason}
+              onChange={(event) => setBulkReason(event.target.value)}
+            />
           </label>
           <label>
             Bulk source
-            <input value={bulkSource} onChange={(event) => setBulkSource(event.target.value)} />
+            <input
+              disabled={bulkLocked}
+              value={bulkSource}
+              onChange={(event) => setBulkSource(event.target.value)}
+            />
           </label>
           <button
             type="button"
-            disabled={!selected.length || bulkOperation.pending}
+            disabled={!selected.length || bulkLocked}
             onClick={() => void bulkSet()}
           >
             Set selected suppression
@@ -315,7 +389,7 @@ export function SuppressionScreen({
             <ErrorNotice
               error={bulkOperation.error}
               retryLabel="Retry setting selected suppression"
-              onRetry={bulkOperation.retry}
+              onRetry={() => void retryBulk()}
             />
           )}
         </section>
@@ -351,6 +425,7 @@ export function SuppressionScreen({
                 item={item}
                 allowed={capabilities.update}
                 selectable={canBulk}
+                selectionDisabled={bulkLocked}
                 selected={
                   item.channel === bulkChannel && selected.includes(item.contact_id)
                 }
@@ -366,7 +441,7 @@ export function SuppressionScreen({
         <nav aria-label="Suppression pages">
           <button
             type="button"
-            disabled={query.offset === 0}
+            disabled={bulkLocked || query.offset === 0}
             onClick={() =>
               setQuery((current) => ({
                 ...current,
@@ -378,7 +453,7 @@ export function SuppressionScreen({
           </button>
           <button
             type="button"
-            disabled={query.offset + query.limit >= page.total}
+            disabled={bulkLocked || query.offset + query.limit >= page.total}
             onClick={() =>
               setQuery((current) => ({ ...current, offset: current.offset + current.limit }))
             }

@@ -30,8 +30,12 @@ export function ListDetailScreen({
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [loadError, setLoadError] = useState<CrmUiError | null>(null);
   const [searchError, setSearchError] = useState<CrmUiError | null>(null);
+  const [addLocked, setAddLocked] = useState(false);
+  const [removeLocked, setRemoveLocked] = useState(false);
   const detailRequest = useRef(0);
   const searchRequest = useRef(0);
+  const addLock = useRef(false);
+  const removeLock = useRef(false);
   const removalKey = JSON.stringify(selectedToRemove);
   const queryKey = JSON.stringify(query);
   const addOperation = useCrmOperation(
@@ -111,12 +115,26 @@ export function ListDetailScreen({
   }
 
   async function add() {
-    if (!visible || !capabilities.update || !capabilities.bulkActions || !selectedToAdd.length) return;
+    if (
+      !visible ||
+      !capabilities.update ||
+      !capabilities.bulkActions ||
+      !selectedToAdd.length ||
+      addLock.current
+    )
+      return;
     const ids = [...selectedToAdd];
-    await addOperation.start(() => adapter.addMembers(visible.id, ids), () => {
-      setSelectedToAdd([]);
-      void load();
-    });
+    addLock.current = true;
+    setAddLocked(true);
+    try {
+      await addOperation.start(() => adapter.addMembers(visible.id, ids), () => {
+        setSelectedToAdd([]);
+        void load();
+      });
+    } finally {
+      addLock.current = false;
+      setAddLocked(false);
+    }
   }
 
   async function remove() {
@@ -124,15 +142,47 @@ export function ListDetailScreen({
       !visible ||
       !capabilities.remove ||
       !capabilities.bulkActions ||
-      !selectedToRemove.length
+      !selectedToRemove.length ||
+      removeLock.current
     )
       return;
     const ids = [...selectedToRemove];
-    await removeOperation.start(() => adapter.removeMembers(visible.id, ids), () => {
-      setSelectedToRemove([]);
-      void load();
-    });
+    removeLock.current = true;
+    setRemoveLocked(true);
     setConfirmingRemoval(false);
+    try {
+      await removeOperation.start(() => adapter.removeMembers(visible.id, ids), () => {
+        setSelectedToRemove([]);
+        void load();
+      });
+    } finally {
+      removeLock.current = false;
+      setRemoveLocked(false);
+    }
+  }
+
+  async function retryAdd() {
+    if (addLock.current) return;
+    addLock.current = true;
+    setAddLocked(true);
+    try {
+      await addOperation.retry();
+    } finally {
+      addLock.current = false;
+      setAddLocked(false);
+    }
+  }
+
+  async function retryRemove() {
+    if (removeLock.current) return;
+    removeLock.current = true;
+    setRemoveLocked(true);
+    try {
+      await removeOperation.retry();
+    } finally {
+      removeLock.current = false;
+      setRemoveLocked(false);
+    }
   }
 
   return (
@@ -155,6 +205,7 @@ export function ListDetailScreen({
                       type="checkbox"
                       aria-label={`Select ${label(contact)} for removal`}
                       checked={selectedToRemove.includes(contact.id)}
+                      disabled={removeLocked}
                       onChange={(event) =>
                         toggle(setSelectedToRemove, contact.id, event.target.checked)
                       }
@@ -167,7 +218,7 @@ export function ListDetailScreen({
             {capabilities.remove && capabilities.bulkActions && (
               <button
                 type="button"
-                disabled={!selectedToRemove.length || removeOperation.pending}
+                disabled={!selectedToRemove.length || removeLocked}
                 onClick={() => setConfirmingRemoval(true)}
               >
                 Remove selected members
@@ -178,7 +229,7 @@ export function ListDetailScreen({
                 titleId="remove-members-title"
                 title="Remove selected members?"
                 confirmLabel="Confirm removal"
-                pending={removeOperation.pending}
+                pending={removeLocked}
                 onConfirm={() => void remove()}
                 onCancel={() => setConfirmingRemoval(false)}
               />
@@ -187,7 +238,7 @@ export function ListDetailScreen({
               <ErrorNotice
                 error={removeOperation.error}
                 retryLabel="Retry removing members"
-                onRetry={removeOperation.retry}
+                onRetry={() => void retryRemove()}
               />
             )}
           </section>
@@ -199,11 +250,14 @@ export function ListDetailScreen({
                 Search contacts
                 <input
                   type="search"
+                  disabled={addLocked}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                 />
               </label>
-              <button type="submit">Search</button>
+              <button type="submit" disabled={addLocked}>
+                Search
+              </button>
             </form>
             {searchError && (
               <ErrorNotice
@@ -222,6 +276,7 @@ export function ListDetailScreen({
                           type="checkbox"
                           aria-label={`Select ${label(contact)} to add`}
                           checked={selectedToAdd.includes(contact.id)}
+                          disabled={addLocked}
                           onChange={(event) =>
                             toggle(setSelectedToAdd, contact.id, event.target.checked)
                           }
@@ -234,7 +289,7 @@ export function ListDetailScreen({
                 <nav aria-label="Contact search pages">
                   <button
                     type="button"
-                    disabled={query.offset === 0}
+                    disabled={addLocked || query.offset === 0}
                     onClick={() =>
                       setQuery((current) => ({
                         ...current,
@@ -246,7 +301,9 @@ export function ListDetailScreen({
                   </button>
                   <button
                     type="button"
-                    disabled={query.offset + query.limit >= contacts.total}
+                    disabled={
+                      addLocked || query.offset + query.limit >= contacts.total
+                    }
                     onClick={() =>
                       setQuery((current) => ({
                         ...current,
@@ -262,7 +319,7 @@ export function ListDetailScreen({
             {capabilities.update && capabilities.bulkActions && (
               <button
                 type="button"
-                disabled={!selectedToAdd.length || addOperation.pending}
+                disabled={!selectedToAdd.length || addLocked}
                 onClick={() => void add()}
               >
                 Add selected members
@@ -272,7 +329,7 @@ export function ListDetailScreen({
               <ErrorNotice
                 error={addOperation.error}
                 retryLabel="Retry adding members"
-                onRetry={addOperation.retry}
+                onRetry={() => void retryAdd()}
               />
             )}
           </section>
