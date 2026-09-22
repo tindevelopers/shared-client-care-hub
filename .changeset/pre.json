@@ -10,6 +10,7 @@
   "changesets": [
     "domain-campaigns-lifecycle",
     "domain-contacts-lists-suppression",
+    "fix-rc0-missing-build-output",
     "schema-crm-ui-shapes",
     "ui-crm-screens"
   ]
