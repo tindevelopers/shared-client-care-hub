@@ -93,9 +93,11 @@ export class InvalidCampaignTransitionError extends Error {
    * plain string so status drift (a value outside the canonical union) is
    * reported verbatim instead of escaping as an implementation exception.
    */
+  readonly status: string | null;
   constructor(status: string | null, action: CampaignTransitionAction) {
     super(`Cannot ${action} campaign from status ${status ?? "unknown"}`);
     this.name = "InvalidCampaignTransitionError";
+    this.status = status;
   }
 }
 
