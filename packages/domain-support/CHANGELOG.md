@@ -30,6 +30,12 @@ the public API a consumer must account for on upgrade:
   real one (it was always a runtime import in `graduation.ts`, not type-only).
   `@supabase/supabase-js` and `@tindevelopers/schema-support` (`workspace:^`)
   are added as real dependencies.
+- **Attachment paths must sit inside the tenant's storage folder**
+  (`<tenantId>/…`, optionally prefixed `support-tickets/`, no `..`
+  segments). `createSupportAttachmentStore().create` rejects any other
+  `file_path` before touching the database, and `remove`/`getDownloadUrl`
+  refuse to delete or sign a stored path outside the folder. The
+  core-kernel version accepted any host-supplied path.
 - **`SupportTenantContext` drops `isSystemOperator`/`firstAvailableTenantId`,
   and `resolveSupportTenantId` no longer falls back to an arbitrary tenant
   for system operators.** The old fallback let a platform-operator caller

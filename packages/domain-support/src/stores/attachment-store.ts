@@ -21,6 +21,15 @@ function storagePath(filePath: string): string {
   return filePath.replace(/^\/?support-tickets\//, "");
 }
 
+// file_path is host-supplied; without this a caller could record, sign or delete another tenant's object.
+function tenantStoragePath(filePath: string, tenantId: string): string {
+  const path = storagePath(filePath);
+  if (!path.startsWith(`${tenantId}/`) || path.split("/").includes("..")) {
+    throw new Error("Attachment path is outside the tenant's storage folder");
+  }
+  return path;
+}
+
 export interface CreateSupportAttachmentInput {
   ticket_id: string;
   thread_id?: string;
@@ -75,6 +84,7 @@ export function createSupportAttachmentStore(
     },
 
     async create(input) {
+      tenantStoragePath(input.file_path, tenantId);
       const { data: ticket } = await tickets()
         .select("id")
         .eq("id", input.ticket_id)
@@ -111,7 +121,7 @@ export function createSupportAttachmentStore(
       if (attachment) {
         const { error: storageError } = await client.storage
           .from(BUCKET)
-          .remove([storagePath((attachment as { file_path: string }).file_path)]);
+          .remove([tenantStoragePath((attachment as { file_path: string }).file_path, tenantId)]);
         if (storageError) {
           console.error("Failed to delete file from storage:", storageError);
           // Continue with database deletion even if storage deletion fails.
@@ -132,7 +142,7 @@ export function createSupportAttachmentStore(
 
       const { data } = await client.storage
         .from(BUCKET)
-        .createSignedUrl(storagePath((attachment as { file_path: string }).file_path), expiresIn);
+        .createSignedUrl(tenantStoragePath((attachment as { file_path: string }).file_path, tenantId), expiresIn);
       return data?.signedUrl ?? null;
     },
   };

@@ -48,7 +48,7 @@ describe("createSupportAttachmentStore", () => {
       store.create({
         ticket_id: "missing",
         file_name: "x",
-        file_path: "support-tickets/x",
+        file_path: "support-tickets/ten-1/missing/x",
         file_size: 1,
         mime_type: "text/plain",
         uploaded_by: "user-1",
@@ -95,5 +95,42 @@ describe("createSupportAttachmentStore", () => {
     const { client } = createMockSupabase([{ data: null }]);
     const store = createSupportAttachmentStore(client, TENANT);
     await expect(store.getDownloadUrl("missing")).resolves.toBeNull();
+  });
+
+  it.each([
+    ["another tenant's folder", "support-tickets/ten-2/t-9/secret.pdf"],
+    ["a path traversal", "support-tickets/ten-1/../ten-2/secret.pdf"],
+    ["the bucket root", "secret.pdf"],
+  ])("create() rejects %s before touching the database", async (_label, filePath) => {
+    const { client, calls } = createMockSupabase([]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    await expect(
+      store.create({
+        ticket_id: "t-1",
+        file_name: "secret.pdf",
+        file_path: filePath,
+        file_size: 1,
+        mime_type: "application/pdf",
+        uploaded_by: "user-1",
+      }),
+    ).rejects.toThrow("outside the tenant's storage folder");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("getDownloadUrl() refuses to sign a stored path outside the tenant's folder", async () => {
+    const { client, calls } = createMockSupabase([{ data: { file_path: "support-tickets/ten-2/t-9/secret.pdf" } }]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    await expect(store.getDownloadUrl("a-1")).rejects.toThrow("outside the tenant's storage folder");
+    expect(calls.some((c) => c.op === "storage.createSignedUrl")).toBe(false);
+  });
+
+  it("remove() refuses to delete a stored object outside the tenant's folder", async () => {
+    const { client, calls } = createMockSupabase([{ data: { file_path: "support-tickets/ten-2/t-9/secret.pdf" } }]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    await expect(store.remove("a-1")).rejects.toThrow("outside the tenant's storage folder");
+    expect(calls.some((c) => c.op === "storage.remove")).toBe(false);
   });
 });
