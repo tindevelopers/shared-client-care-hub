@@ -2,7 +2,7 @@
   "name": "@tindevelopers/schema-support",
   "version": "0.0.0",
   "license": "MIT",
-  "description": "Support shell Zod schemas, row/insert/update types, manifest, and ground-truth migrations for the four existing support-ticketing tables",
+  "description": "Support shell Zod schemas, row/insert/update types, manifest, and ground-truth migrations for the five existing support-ticketing tables",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

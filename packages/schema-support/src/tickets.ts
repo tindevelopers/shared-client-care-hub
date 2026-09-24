@@ -3,15 +3,21 @@ import { z } from "zod";
 /**
  * Zod schema for the `support_tickets` table.
  *
- * Ground truth: konnect-caas-base supabase/migrations
- * (composite of 3 migrations), composed with the TypeScript types at
- * shell-base-admin packages/core-kernel/support/types.ts.
+ * Ground truth: konnect-caas-base supabase/migrations, composed with the
+ * TypeScript types at shell-base-admin packages/core-kernel/support/types.ts.
  *
  * Base: 20251221000000_create_support_tickets_schema.sql (lines 21-35).
- * Alters: 20260223000000_support_tickets_error_escalation.sql
- * (support_code, support_ref, escalated_to_platform_admin_at),
- * 20260905000000_create_sync_bindings.sql (external_refs, sync_state — the
- * "R2 envelope on the first support capability").
+ * Alter shipped in this package's migrations/:
+ * 20260223000000_support_tickets_error_escalation.sql (support_code,
+ * support_ref, escalated_to_platform_admin_at).
+ *
+ * Alter NOT shipped here: `external_refs`/`sync_state` (the "R2 envelope on
+ * the first support capability") were added by konnect's
+ * `20260905000000_create_sync_bindings.sql`, which is owned by the sync
+ * engine (creates sync_bindings/sync_runs/sync_conflicts/sync_dead_letters —
+ * none of them support tables). Per ADR-0002 that migration is not re-shipped
+ * from this package (see README "Migrations"); the two columns are still
+ * modeled below because they are real, current DB ground truth.
  */
 
 const timestamptz = z.string();

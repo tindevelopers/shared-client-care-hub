@@ -11,16 +11,18 @@ const EXISTING_TABLES = [
   "support_tickets",
   "support_ticket_threads",
   "support_ticket_attachments",
+  "support_ticket_history",
 ];
 
 describe("support manifest", () => {
-  it("manifest lists exactly the four owned tables", () => {
+  it("manifest lists exactly the five owned tables", () => {
+    // support_ticket_history is created by this package's own base migration
+    // (20251221000000) — ADR-0002 requires the manifest to declare every
+    // table a package's migrations create, so it is claimed here alongside
+    // the other four.
     expect(Object.keys(supportManifest.tables).sort()).toEqual(EXISTING_TABLES.sort());
     expect(Object.keys(tables).sort()).toEqual(EXISTING_TABLES.sort());
     expect([...SUPPORT_TABLE_NAMES].sort()).toEqual(EXISTING_TABLES.sort());
-    // support_ticket_history is created by the same base migration but is
-    // out of scope for this package (task-scoped to the 4 tables above).
-    expect(supportManifest.tables).not.toHaveProperty("support_ticket_history");
   });
 
   it("manifest references only migration files that exist in the migrations dir", () => {
