@@ -1,39 +1,29 @@
 /**
  * Support tenant-resolution policy (pure).
  *
- * The host resolves the actor's identity facts (own tenant, operator role,
- * first available tenant) from server-controlled records and injects them
- * here; the domain owns only the decision. Error message prefixes
- * ("No tenants found", "No tenant found") are stable — hosts may branch on
- * them for empty-state handling.
+ * The host resolves the actor's own tenant id from server-controlled
+ * records and injects it here; the domain owns only the decision, and the
+ * decision is fail-closed: act only in the actor's resolved tenant, or
+ * refuse. There is no platform-operator branch — a platform staffer reaches
+ * a customer tenant through a support session (impersonation), which
+ * resolves a normal `currentTenantId` like any other actor; the domain
+ * needs no special case for it. Nothing here may pick an arbitrary tenant
+ * on the actor's behalf. The error message prefix ("No tenant found") is
+ * stable — hosts may branch on it for empty-state handling.
  */
 export interface SupportTenantContext {
   /** The actor's own tenant id, when their record carries one. */
   currentTenantId: string | null;
-  /** True when the actor holds a global operator role (tenant_id = NULL). */
-  isSystemOperator: boolean;
-  /** The earliest-created tenant an operator may act for, when one exists. */
-  firstAvailableTenantId?: string | null;
 }
 
 /**
- * Resolve the tenant a support operation acts for:
- *   1. the actor's own tenant when present;
- *   2. for system operators, the first available tenant;
- *   3. otherwise fail closed.
+ * Resolve the tenant a support operation acts for: the actor's own tenant,
+ * or fail closed. There is no fallback to "some other tenant" — a caller
+ * with no resolved tenant scope gets a thrown error, never a guess.
  */
 export function resolveSupportTenantId(context: SupportTenantContext): string {
   if (context.currentTenantId) {
     return context.currentTenantId;
-  }
-
-  if (context.isSystemOperator) {
-    if (context.firstAvailableTenantId) {
-      return context.firstAvailableTenantId;
-    }
-    throw new Error(
-      "No tenants found. As a Platform Admin, you need to create a tenant first before creating support tickets. Please create a tenant in Tenant Management.",
-    );
   }
 
   throw new Error(

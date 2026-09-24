@@ -32,4 +32,13 @@ The higher-level pieces (`ticket-policy`, `handoff`, `conversation-support`,
 (e.g. with `@tindevelopers/core-kernel/email` and the graduation core wired
 through `createBindingProviderResolver`).
 
+## Tenant resolution is fail-closed
+
+`resolveSupportTenantId(context)` acts only in the actor's own resolved
+tenant (`context.currentTenantId`); with none, it throws — it never falls
+back to picking some other tenant. There is no platform-operator branch:
+platform staff reach a customer tenant through a support session
+(impersonation), which resolves a normal `currentTenantId` like any other
+actor, so the domain needs no special case for it.
+
 Required env: none.
