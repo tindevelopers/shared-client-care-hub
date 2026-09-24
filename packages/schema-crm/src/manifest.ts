@@ -12,6 +12,8 @@ export const CRM_TABLE_NAMES = [
   "contact_sync_log",
   "sync_state",
   "field_mappings",
+  "processed_external_events",
+  "conversation_turns",
 ] as const;
 
 export type CrmTableName = (typeof CRM_TABLE_NAMES)[number];
@@ -89,6 +91,15 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
   },
   field_mappings: {
     migrations: ["20260603120000_create_integration_sync_schema.sql"],
+  },
+  processed_external_events: {
+    migrations: ["20260603120000_create_integration_sync_schema.sql"],
+  },
+  conversation_turns: {
+    migrations: [
+      "20260614120000_create_conversation_tables.sql",
+      "20260615000002_fix_multiturn_sms_constraints.sql",
+    ],
   },
 };
 

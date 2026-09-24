@@ -6,7 +6,11 @@ import { CRM_TABLE_NAMES, crmManifest, tables } from "../manifest";
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-const TEN_EXISTING = [
+// ADR-0002 (shell-base-admin) added conversation_turns and
+// processed_external_events as formally declared CRM tables: both were
+// already physically created by this package's own migrations, just not
+// previously listed in the manifest.
+const EXISTING_TABLES = [
   "campaign_recipients",
   "campaigns",
   "contact_channels",
@@ -15,7 +19,9 @@ const TEN_EXISTING = [
   "contact_suppressions",
   "contact_sync_log",
   "contacts",
+  "conversation_turns",
   "field_mappings",
+  "processed_external_events",
   "sync_state",
 ];
 
@@ -27,10 +33,10 @@ const NONEXISTENT_PROPOSALS = [
 ];
 
 describe("crm manifest", () => {
-  it("manifest lists exactly the ten existing tables", () => {
-    expect(Object.keys(crmManifest.tables).sort()).toEqual(TEN_EXISTING);
-    expect(Object.keys(tables).sort()).toEqual(TEN_EXISTING);
-    expect([...CRM_TABLE_NAMES].sort()).toEqual(TEN_EXISTING);
+  it("manifest lists exactly the existing tables", () => {
+    expect(Object.keys(crmManifest.tables).sort()).toEqual(EXISTING_TABLES);
+    expect(Object.keys(tables).sort()).toEqual(EXISTING_TABLES);
+    expect([...CRM_TABLE_NAMES].sort()).toEqual(EXISTING_TABLES);
     expect(Object.keys(crmManifest.tables)).toContain("contact_suppressions");
     for (const proposal of NONEXISTENT_PROPOSALS) {
       expect(crmManifest.tables).not.toHaveProperty(proposal);
