@@ -4,20 +4,21 @@
  * First-party write first, notifications second (failures isolated), desk
  * sync best-effort last — a specialist outage never blocks the tenant.
  */
-import type { UpdateTicketInput } from "@tindevelopers/core-kernel/support";
+import type { UpdateTicketInput } from "./types.js";
+import type { CreateSupportTicketInput } from "./stores/ticket-store.js";
 import type {
   SupportServiceDeps,
   SupportStore,
   SupportTicket,
   SupportTicketQuery,
-} from "./store";
+} from "./store.js";
 import {
   buildTicketCreatedNotifications,
   buildTicketEscalatedNotifications,
   buildTicketUpdatedNotifications,
   sendNotifications,
   type SupportTicketChanges,
-} from "./notifications";
+} from "./notifications.js";
 
 /** List tickets for the tenant the store is bound to. */
 export async function listTickets(
@@ -42,17 +43,17 @@ export async function getTicket(
  */
 export async function createTicket(
   deps: SupportServiceDeps,
-  ticket: SupportTicket,
+  input: CreateSupportTicketInput,
 ): Promise<SupportTicket> {
-  const saved = await deps.store.saveTicket(ticket);
+  const saved = await deps.store.createTicket(input);
   await sendNotifications(deps.notifications, buildTicketCreatedNotifications(saved));
   await syncDeskBestEffort(deps, saved);
   return saved;
 }
 
 /**
- * Update a support ticket: merges the defined input fields onto the stored
- * row, then emits escalation and change notifications for tracked fields.
+ * Update a support ticket: merges the input onto the stored row via the
+ * store, then emits escalation and change notifications for tracked fields.
  */
 export async function updateTicket(
   deps: SupportServiceDeps,
@@ -62,8 +63,7 @@ export async function updateTicket(
   const oldTicket = await deps.store.getTicket(ticketId);
   if (!oldTicket) return null;
 
-  const merged: SupportTicket = { ...oldTicket, ...definedFields(input) };
-  const saved = await deps.store.saveTicket(merged);
+  const saved = await deps.store.updateTicket(ticketId, input);
 
   if (input.escalated_to_platform_admin_at && !oldTicket.escalated_to_platform_admin_at) {
     await sendNotifications(deps.notifications, buildTicketEscalatedNotifications(saved));
@@ -89,10 +89,4 @@ async function syncDeskBestEffort(
   } catch (error) {
     console.error(`Best-effort desk sync failed for ticket ${ticket.id}:`, error);
   }
-}
-
-function definedFields<T extends object>(input: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined),
-  ) as Partial<T>;
 }

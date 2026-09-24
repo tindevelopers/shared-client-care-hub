@@ -21,9 +21,10 @@
     "type-check": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },
-  "peerDependencies": {
-    "@tindevelopers/core-kernel": "^2.0.0",
-    "@tindevelopers/adapter-kit": "^1.0.0"
+  "dependencies": {
+    "@supabase/supabase-js": "^2.89.0",
+    "@tindevelopers/adapter-kit": "^1.9.1",
+    "@tindevelopers/schema-support": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

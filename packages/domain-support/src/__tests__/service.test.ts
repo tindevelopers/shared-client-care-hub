@@ -6,7 +6,8 @@ import type {
   SupportTicket,
   SupportTicketAttachment,
   SupportTicketThread,
-} from "@tindevelopers/core-kernel/support";
+} from "../types";
+import type { CreateSupportTicketInput } from "../stores/ticket-store";
 
 function ticket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
@@ -22,6 +23,21 @@ function ticket(overrides: Partial<SupportTicket> = {}): SupportTicket {
     assigned_to: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    support_code: null,
+    support_ref: null,
+    escalated_to_platform_admin_at: null,
+    external_refs: {},
+    sync_state: {},
+    ...overrides,
+  };
+}
+
+function draft(overrides: Partial<CreateSupportTicketInput> = {}): CreateSupportTicketInput {
+  return {
+    subject: "Login broken",
+    description: "Cannot sign in",
+    priority: "high",
+    created_by: "user-customer",
     ...overrides,
   };
 }
@@ -67,7 +83,16 @@ function fakeStore(): SupportStore {
   return {
     listTickets: vi.fn().mockResolvedValue([ticket()]),
     getTicket: vi.fn().mockResolvedValue(ticket()),
-    saveTicket: vi.fn().mockImplementation(async (t: SupportTicket) => t),
+    createTicket: vi.fn().mockImplementation(async (input: CreateSupportTicketInput) =>
+      ticket({
+        subject: input.subject,
+        description: input.description ?? null,
+        priority: input.priority ?? "medium",
+        created_by: input.created_by,
+        assigned_to: input.assigned_to ?? null,
+      }),
+    ),
+    updateTicket: vi.fn().mockImplementation(async (_id: string, input) => ticket(input)),
     listThreads: vi.fn().mockResolvedValue([thread()]),
     appendThread: vi.fn().mockImplementation(async (input) =>
       thread({
@@ -103,10 +128,17 @@ function setup(options?: {
     (async () => {
       calls.push("syncDeskBestEffort");
     });
-  (store.saveTicket as ReturnType<typeof vi.fn>).mockImplementation(async (t: SupportTicket) => {
-    calls.push("saveTicket");
-    return t;
-  });
+  (store.createTicket as ReturnType<typeof vi.fn>).mockImplementation(
+    async (input: CreateSupportTicketInput) => {
+      calls.push("createTicket");
+      return ticket({
+        subject: input.subject,
+        description: input.description ?? null,
+        created_by: input.created_by,
+        assigned_to: input.assigned_to ?? null,
+      });
+    },
+  );
   const service = createSupportService({ store, notifications, syncDeskBestEffort });
   return { service, store, sent, calls };
 }
@@ -160,13 +192,13 @@ describe("createSupportService — store delegation", () => {
 describe("createSupportService — ticket creation", () => {
   it("writes the first-party ticket before any desk sync", async () => {
     const { service, calls } = setup();
-    await service.createTicket(ticket({ assigned_to: "user-agent" }));
-    expect(calls).toEqual(["saveTicket", "syncDeskBestEffort"]);
+    await service.createTicket(draft({ assigned_to: "user-agent" }));
+    expect(calls).toEqual(["createTicket", "syncDeskBestEffort"]);
   });
 
   it("notifies the customer and the assignee after creation", async () => {
     const { service, sent } = setup();
-    const saved = await service.createTicket(ticket({ assigned_to: "user-agent" }));
+    const saved = await service.createTicket(draft({ assigned_to: "user-agent" }));
     expect(saved.id).toBe("t-1");
     expect(sent.map((n) => [n.type, n.recipient])).toEqual([
       ["ticket_created", "customer"],
@@ -178,18 +210,18 @@ describe("createSupportService — ticket creation", () => {
     const { service, store } = setup({
       send: vi.fn().mockRejectedValue(new Error("smtp down")),
     });
-    const saved = await service.createTicket(ticket());
+    const saved = await service.createTicket(draft());
     expect(saved.id).toBe("t-1");
-    expect(store.saveTicket).toHaveBeenCalledOnce();
+    expect(store.createTicket).toHaveBeenCalledOnce();
   });
 
   it("never breaks ticket creation when the desk sync fails", async () => {
     const { service, store } = setup({
       syncDeskBestEffort: vi.fn().mockRejectedValue(new Error("desk down")),
     });
-    const saved = await service.createTicket(ticket());
+    const saved = await service.createTicket(draft());
     expect(saved.id).toBe("t-1");
-    expect(store.saveTicket).toHaveBeenCalledOnce();
+    expect(store.createTicket).toHaveBeenCalledOnce();
   });
 });
 
@@ -200,7 +232,8 @@ describe("createSupportService — ticket updates", () => {
 
     const updated = await service.updateTicket("t-1", { status: "resolved", priority: "low" });
 
-    expect(store.saveTicket).toHaveBeenCalledWith(
+    expect(store.updateTicket).toHaveBeenCalledWith(
+      "t-1",
       expect.objectContaining({ status: "resolved", priority: "low" }),
     );
     expect(updated?.status).toBe("resolved");
@@ -229,7 +262,7 @@ describe("createSupportService — ticket updates", () => {
     const { service, store } = setup();
     (store.getTicket as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     await expect(service.updateTicket("missing", { status: "closed" })).resolves.toBeNull();
-    expect(store.saveTicket).not.toHaveBeenCalled();
+    expect(store.updateTicket).not.toHaveBeenCalled();
   });
 });
 

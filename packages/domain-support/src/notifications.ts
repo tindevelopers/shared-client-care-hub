@@ -10,7 +10,7 @@
  * Notification types carried over from the server-action era — none are
  * removed: ticket_created, ticket_updated, ticket_escalated, ticket_reply.
  */
-import type { SupportTicket, SupportTicketThread } from "@tindevelopers/core-kernel/support";
+import type { SupportTicket, SupportTicketThread } from "./types.js";
 
 /** Recipient role — the host resolves it to concrete addresses. */
 export type SupportNotificationRecipient = "customer" | "assignee" | "platform_admins";

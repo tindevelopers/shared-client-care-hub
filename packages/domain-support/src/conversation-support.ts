@@ -6,8 +6,8 @@
  * ours is the system of record). Every effect is an injected dependency —
  * the host owns storage, identity, and desk wiring.
  */
-import type { CreateTicketInput } from "@tindevelopers/core-kernel/support";
-import { shouldCreateSupportTicket, type SupportOutcome } from "./ticket-policy";
+import type { CreateTicketInput } from "./types.js";
+import { shouldCreateSupportTicket, type SupportOutcome } from "./ticket-policy.js";
 
 export interface ConversationSupportInput {
   /** Host-shaped canonical conversation draft to persist. */

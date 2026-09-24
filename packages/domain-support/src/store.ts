@@ -1,11 +1,12 @@
 /**
  * Support store contract and service composition (pure).
  *
- * `SupportStore` is the ONLY storage seam of the support domain: the host
- * implements it (against any database) bound to the acting tenant, and
- * `createSupportService(deps)` composes every ticket, thread, attachment,
- * and category operation on top of it. The domain itself never touches a
- * database client.
+ * `SupportStore` is the ONLY storage seam of the support domain:
+ * `createSupportStore(client, tenantId)` (see `./stores`) is the concrete,
+ * injected implementation against Supabase, and `createSupportService(deps)`
+ * composes every ticket, thread, attachment, and category operation on top
+ * of whichever `SupportStore` is injected. This module itself never touches
+ * a database client.
  */
 import type {
   SupportCategory,
@@ -15,12 +16,13 @@ import type {
   TicketPriority,
   TicketStatus,
   UpdateTicketInput,
-} from "@tindevelopers/core-kernel/support";
-import type { SupportNotificationSender } from "./notifications";
-import { createTicket, getTicket, listTickets, updateTicket } from "./tickets";
-import { appendThread, listThreads } from "./threads";
-import { listAttachments } from "./attachments";
-import { deleteCategory, listCategories, saveCategory } from "./categories";
+} from "./types.js";
+import type { CreateSupportTicketInput } from "./stores/ticket-store.js";
+import type { SupportNotificationSender } from "./notifications.js";
+import { createTicket, getTicket, listTickets, updateTicket } from "./tickets.js";
+import { appendThread, listThreads } from "./threads.js";
+import { listAttachments } from "./attachments.js";
+import { deleteCategory, listCategories, saveCategory } from "./categories.js";
 
 export type {
   SupportCategory,
@@ -58,18 +60,20 @@ export interface SaveCategoryInput {
 }
 
 /**
- * The injected storage contract — implemented by the host.
+ * The injected storage contract. `createSupportStore(client, tenantId)` (see
+ * `./stores`) is the reference implementation against Supabase; a test may
+ * inject a fake instead.
  *
- * `getTicket`/`saveTicket`/`listTickets` implementations SHOULD populate the
- * optional `created_by_user`/`assigned_to_user` joins (as core-kernel's
- * reference implementation does) or notification personalization silently
+ * `getTicket`/`createTicket`/`listTickets` implementations SHOULD populate
+ * the optional `created_by_user`/`assigned_to_user` joins (as
+ * `createSupportTicketStore` does) or notification personalization silently
  * degrades to generic greetings.
  */
 export interface SupportStore {
   listTickets(query: SupportTicketQuery): Promise<SupportTicket[]>;
   getTicket(id: string): Promise<SupportTicket | null>;
-  /** The host owns identifier synthesis (`id`, `ticket_number`, timestamps) before create. */
-  saveTicket(ticket: SupportTicket): Promise<SupportTicket>;
+  createTicket(input: CreateSupportTicketInput): Promise<SupportTicket>;
+  updateTicket(id: string, input: UpdateTicketInput): Promise<SupportTicket>;
   listThreads(ticketId: string): Promise<SupportTicketThread[]>;
   appendThread(input: CreateThreadInput): Promise<SupportTicketThread>;
   listAttachments(ticketId: string): Promise<SupportTicketAttachment[]>;
@@ -88,7 +92,7 @@ export interface SupportServiceDeps {
 export interface SupportService {
   listTickets(query: SupportTicketQuery): Promise<SupportTicket[]>;
   getTicket(id: string): Promise<SupportTicket | null>;
-  createTicket(ticket: SupportTicket): Promise<SupportTicket>;
+  createTicket(input: CreateSupportTicketInput): Promise<SupportTicket>;
   updateTicket(ticketId: string, input: UpdateTicketInput): Promise<SupportTicket | null>;
   listThreads(ticketId: string): Promise<SupportTicketThread[]>;
   appendThread(input: CreateThreadInput): Promise<SupportTicketThread>;
@@ -103,7 +107,7 @@ export function createSupportService(deps: SupportServiceDeps): SupportService {
   return {
     listTickets: (query) => listTickets(deps.store, query),
     getTicket: (id) => getTicket(deps.store, id),
-    createTicket: (ticket) => createTicket(deps, ticket),
+    createTicket: (input) => createTicket(deps, input),
     updateTicket: (ticketId, input) => updateTicket(deps, ticketId, input),
     listThreads: (ticketId) => listThreads(deps.store, ticketId),
     appendThread: (input) => appendThread(deps, input),

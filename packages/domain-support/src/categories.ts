@@ -1,8 +1,8 @@
 /**
  * Category operations over the injected store (pure).
  */
-import type { SupportCategory } from "@tindevelopers/core-kernel/support";
-import type { SaveCategoryInput, SupportStore } from "./store";
+import type { SupportCategory } from "./types.js";
+import type { SaveCategoryInput, SupportStore } from "./store.js";
 
 /** List the categories of the tenant the store is bound to. */
 export async function listCategories(store: SupportStore): Promise<SupportCategory[]> {

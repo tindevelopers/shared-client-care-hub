@@ -4,9 +4,9 @@
  * The first-party thread is always appended first; the reply notification
  * decision follows and can never break the append.
  */
-import type { SupportTicketThread } from "@tindevelopers/core-kernel/support";
-import type { CreateThreadInput, SupportServiceDeps, SupportStore } from "./store";
-import { buildTicketReplyNotifications, sendNotifications } from "./notifications";
+import type { SupportTicketThread } from "./types.js";
+import type { CreateThreadInput, SupportServiceDeps, SupportStore } from "./store.js";
+import { buildTicketReplyNotifications, sendNotifications } from "./notifications.js";
 
 /** List the threads of a ticket. */
 export async function listThreads(
