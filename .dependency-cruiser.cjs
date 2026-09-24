@@ -40,6 +40,38 @@ module.exports = {
       to: { path: "^(@tindevelopers/domain-contacts|packages/domain-contacts/)" },
     },
     {
+      name: "no-domain-support-to-contacts",
+      comment:
+        "R5 — domain-support must not import domain-contacts. Cross-domain " +
+        "communication goes through core-kernel/events or injected callbacks.",
+      severity: "error",
+      from: { path: "^packages/domain-support/" },
+      to: { path: "^(@tindevelopers/domain-contacts|packages/domain-contacts/)" },
+    },
+    {
+      name: "no-domain-support-to-contacts-reverse",
+      comment: "R5 — the reverse direction of no-domain-support-to-contacts.",
+      severity: "error",
+      from: { path: "^packages/domain-contacts/" },
+      to: { path: "^(@tindevelopers/domain-support|packages/domain-support/)" },
+    },
+    {
+      name: "no-domain-support-to-campaigns",
+      comment:
+        "R5 — domain-support must not import domain-campaigns. Cross-domain " +
+        "communication goes through core-kernel/events or injected callbacks.",
+      severity: "error",
+      from: { path: "^packages/domain-support/" },
+      to: { path: "^(@tindevelopers/domain-campaigns|packages/domain-campaigns/)" },
+    },
+    {
+      name: "no-domain-support-to-campaigns-reverse",
+      comment: "R5 — the reverse direction of no-domain-support-to-campaigns.",
+      severity: "error",
+      from: { path: "^packages/domain-campaigns/" },
+      to: { path: "^(@tindevelopers/domain-support|packages/domain-support/)" },
+    },
+    {
       name: "no-vendor-in-domain",
       comment:
         "R1 — a domain package imports a port from adapter-kit, never a vendor SDK. " +

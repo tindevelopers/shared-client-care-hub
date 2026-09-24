@@ -1,0 +1,38 @@
+{
+  "name": "@tindevelopers/schema-support",
+  "version": "0.0.0",
+  "license": "MIT",
+  "description": "Support shell Zod schemas, row/insert/update types, manifest, and ground-truth migrations for the five existing support-ticketing tables",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js",
+      "default": "./dist/manifest.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.9.2"
+  },
+  "type": "module"
+}
