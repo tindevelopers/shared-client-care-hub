@@ -121,13 +121,13 @@ export function createSupportTicketStore(client: SupabaseClient, tenantId: strin
         .insert({
           tenant_id: tenantId,
           subject: input.subject,
-          description: input.description ?? null,
+          description: input.description || null,
           priority: input.priority ?? "medium",
-          category_id: input.category_id ?? null,
+          category_id: input.category_id || null,
           created_by: input.created_by,
-          assigned_to: input.assigned_to ?? null,
-          support_code: input.support_code ?? null,
-          support_ref: input.support_ref ?? null,
+          assigned_to: input.assigned_to || null,
+          support_code: input.support_code || null,
+          support_ref: input.support_ref || null,
         })
         .select(TICKET_SELECT)
         .single();

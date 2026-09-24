@@ -112,7 +112,7 @@ export function createSupportAttachmentStore(
       const { data, error } = await table()
         .insert({
           ticket_id: input.ticket_id,
-          thread_id: input.thread_id ?? null,
+          thread_id: input.thread_id || null,
           tenant_id: tenantId,
           file_name: input.file_name,
           file_path: input.file_path,

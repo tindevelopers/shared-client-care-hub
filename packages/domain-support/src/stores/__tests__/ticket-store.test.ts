@@ -109,6 +109,28 @@ describe("createSupportTicketStore", () => {
     await expect(store.update("t-1", { category_id: "cat-2" })).rejects.toThrow("Category not found");
   });
 
+  it("create() normalizes empty-string optional fields to null (uuid columns reject '')", async () => {
+    const { client, calls } = createMockSupabase({ data: row() });
+    const store = createSupportTicketStore(client, TENANT);
+
+    await store.create({
+      subject: "Login broken",
+      created_by: "user-1",
+      description: "",
+      category_id: "",
+      assigned_to: "",
+      support_code: "",
+      support_ref: "",
+    });
+
+    const insertArgs = calls.find((c) => c.op === "insert")?.args[0] as Record<string, unknown>;
+    expect(insertArgs.description).toBeNull();
+    expect(insertArgs.category_id).toBeNull();
+    expect(insertArgs.assigned_to).toBeNull();
+    expect(insertArgs.support_code).toBeNull();
+    expect(insertArgs.support_ref).toBeNull();
+  });
+
   it("update() sends only the defined fields and scopes to id + tenant", async () => {
     const { client, calls } = createMockSupabase({ data: row({ status: "resolved" }) });
     const store = createSupportTicketStore(client, TENANT);

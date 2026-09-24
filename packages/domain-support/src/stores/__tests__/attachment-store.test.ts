@@ -83,6 +83,24 @@ describe("createSupportAttachmentStore", () => {
     ).rejects.toThrow("Thread not found");
   });
 
+  it("create() normalizes an empty-string thread_id to null (uuid column rejects '')", async () => {
+    const { client, calls } = createMockSupabase([{ data: { id: "t-1" } }, { data: attachmentRow() }]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    await store.create({
+      ticket_id: "t-1",
+      thread_id: "",
+      file_name: "log.txt",
+      file_path: "support-tickets/ten-1/t-1/log.txt",
+      file_size: 12,
+      mime_type: "text/plain",
+      uploaded_by: "user-1",
+    });
+
+    const insertArgs = calls.find((c) => c.op === "insert")?.args[0] as Record<string, unknown>;
+    expect(insertArgs.thread_id).toBeNull();
+  });
+
   it("create() rejects when the ticket does not exist in this tenant", async () => {
     const { client } = createMockSupabase([{ data: null }]);
     const store = createSupportAttachmentStore(client, TENANT);

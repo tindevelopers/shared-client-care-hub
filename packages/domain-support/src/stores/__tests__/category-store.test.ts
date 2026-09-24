@@ -42,6 +42,14 @@ describe("createSupportCategoryStore", () => {
     });
   });
 
+  it("create() normalizes an empty-string description to null", async () => {
+    const { client, calls } = createMockSupabase({ data: categoryRow() });
+    const store = createSupportCategoryStore(client, TENANT);
+
+    await store.create({ name: "Billing", description: "" });
+    expect((calls.find((c) => c.op === "insert")?.args[0] as Record<string, unknown>).description).toBeNull();
+  });
+
   it("remove() soft-deletes by setting is_active to false, never a hard delete", async () => {
     const { client, calls } = createMockSupabase({ data: null });
     const store = createSupportCategoryStore(client, TENANT);
