@@ -37,12 +37,15 @@ export type SupportTicketPriority = z.infer<typeof supportTicketPrioritySchema>;
  *
  * `ticket_number` is `NOT NULL` in the DDL but is populated by the
  * `set_support_ticket_number` BEFORE INSERT trigger when omitted or empty —
- * the insert schema treats it as optional, like `id`/`created_at`.
+ * the strict insert schema omits it entirely, like `id`/`created_at`.
  *
  * Drift note: `core-kernel/support/types.ts` does not model `external_refs`
  * or `sync_state` (added by 20260905000000, after the types file was last
- * touched) — the SQL wins, so both are added here as `NOT NULL` with the
- * DDL's defaults.
+ * touched) — the SQL wins, so both are modeled here with the DDL's `NOT
+ * NULL` type. They are `.optional()` on the row schema and omitted from the
+ * insert schema because the migration that creates them is not shipped by
+ * this package (see the module doc comment above) — a row read against
+ * only this package's migrations won't have them.
  */
 export const supportTicketRowSchema = z
   .object({
@@ -61,13 +64,13 @@ export const supportTicketRowSchema = z
     support_code: z.string().nullable(),
     support_ref: z.string().nullable(),
     escalated_to_platform_admin_at: timestamptz.nullable(),
-    external_refs: jsonb,
-    sync_state: jsonb,
+    external_refs: jsonb.optional(),
+    sync_state: jsonb.optional(),
   })
   .strict();
 
 export const supportTicketInsertSchema = supportTicketRowSchema
-  .omit({ id: true, ticket_number: true, created_at: true, updated_at: true })
+  .omit({ id: true, ticket_number: true, created_at: true, updated_at: true, external_refs: true, sync_state: true })
   .partial()
   .extend({
     tenant_id: uuid,
