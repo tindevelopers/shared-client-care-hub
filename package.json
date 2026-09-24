@@ -31,7 +31,7 @@
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.0.0",
-    "@tindevelopers/core-kernel": "1.0.0",
+    "@tindevelopers/core-kernel": "2.2.0",
     "@tindevelopers/schema-crm": "workspace:*",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.0",

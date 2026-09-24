@@ -27,7 +27,7 @@
     "@tindevelopers/schema-crm": "workspace:^"
   },
   "peerDependencies": {
-    "@tindevelopers/core-kernel": "^1.0.0"
+    "@tindevelopers/core-kernel": "^1.0.0 || ^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
