@@ -83,6 +83,30 @@ describe("support_tickets", () => {
     );
   });
 
+  it("row schema accepts external_refs/sync_state being absent (migration not shipped by this package)", () => {
+    const { external_refs: _external_refs, sync_state: _sync_state, ...withoutSyncColumns } = ticketFixture;
+    expect(supportTicketRowSchema.safeParse(withoutSyncColumns).success).toBe(true);
+  });
+
+  it("insert schema omits external_refs/sync_state (their migration is not shipped by this package)", () => {
+    expect(
+      supportTicketInsertSchema.safeParse({
+        tenant_id: TENANT,
+        subject: "Cannot log in",
+        created_by: USER,
+        external_refs: {},
+      }).success,
+    ).toBe(false);
+    expect(
+      supportTicketInsertSchema.safeParse({
+        tenant_id: TENANT,
+        subject: "Cannot log in",
+        created_by: USER,
+        sync_state: {},
+      }).success,
+    ).toBe(false);
+  });
+
   it("insert requires tenant_id, subject, created_by only — ticket_number is trigger-generated", () => {
     expect(
       supportTicketInsertSchema.safeParse({

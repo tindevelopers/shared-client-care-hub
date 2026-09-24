@@ -24,9 +24,23 @@ describe("createSupportThreadStore", () => {
     const store = createSupportThreadStore(client, TENANT);
 
     await store.list("t-1");
-    expect(calls.filter((c) => c.op === "eq").map((c) => c.args)).toContainEqual([
+    expect(calls.filter((c) => c.op === "not").map((c) => c.args)).toContainEqual([
       "is_internal",
-      false,
+      "is",
+      true,
+    ]);
+  });
+
+  it("list() treats a NULL is_internal as not internal (nullable column)", async () => {
+    const { client, calls } = createMockSupabase({ data: [threadRow({ is_internal: null })] });
+    const store = createSupportThreadStore(client, TENANT);
+
+    const result = await store.list("t-1");
+    expect(result).toHaveLength(1);
+    expect(calls.filter((c) => c.op === "not").map((c) => c.args)).toContainEqual([
+      "is_internal",
+      "is",
+      true,
     ]);
   });
 
@@ -35,10 +49,7 @@ describe("createSupportThreadStore", () => {
     const store = createSupportThreadStore(client, TENANT);
 
     await store.list("t-1", { includeInternal: true });
-    expect(calls.filter((c) => c.op === "eq").map((c) => c.args)).not.toContainEqual([
-      "is_internal",
-      false,
-    ]);
+    expect(calls.filter((c) => c.op === "not")).toHaveLength(0);
   });
 
   it("create() verifies the ticket exists in the tenant, then inserts with the injected user_id", async () => {

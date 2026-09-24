@@ -52,7 +52,7 @@ export function createSupportCategoryStore(
         .insert({
           tenant_id: tenantId,
           name: input.name,
-          description: input.description ?? null,
+          description: input.description || null,
           is_active: input.is_active ?? true,
         })
         .select()

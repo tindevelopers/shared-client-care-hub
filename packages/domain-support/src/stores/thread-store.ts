@@ -49,7 +49,9 @@ export function createSupportThreadStore(client: SupabaseClient, tenantId: strin
         .order("created_at", { ascending: true });
 
       if (!options?.includeInternal) {
-        q = q.eq("is_internal", false);
+        // is_internal is nullable; .eq("is_internal", false) would hide rows
+        // where it is NULL. Treat NULL the same as false (not internal).
+        q = q.not("is_internal", "is", true);
       }
 
       const { data, error } = await q;

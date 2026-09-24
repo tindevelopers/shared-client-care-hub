@@ -27,6 +27,30 @@ describe("createSupportStore", () => {
     expect(calls.some((c) => c.op === "insert")).toBe(false);
   });
 
+  it("listAttachments excludes attachments on internal threads", async () => {
+    const { client } = createMockSupabase([
+      // threads.list(ticketId, { includeInternal: true })
+      {
+        data: [
+          { id: "th-public", tenant_id: TENANT, is_internal: false },
+          { id: "th-internal", tenant_id: TENANT, is_internal: true },
+        ],
+      },
+      // attachments.list(ticketId)
+      {
+        data: [
+          { id: "a-public", ticket_id: "t-1", thread_id: "th-public" },
+          { id: "a-internal", ticket_id: "t-1", thread_id: "th-internal" },
+          { id: "a-no-thread", ticket_id: "t-1", thread_id: null },
+        ],
+      },
+    ]);
+    const store = createSupportStore(client, TENANT);
+
+    const result = await store.listAttachments("t-1");
+    expect(result.map((a) => a.id)).toEqual(["a-public", "a-no-thread"]);
+  });
+
   it("satisfies the full SupportStore contract createSupportService depends on", () => {
     const { client } = createMockSupabase();
     const store = createSupportStore(client, TENANT);

@@ -21,10 +21,14 @@ function storagePath(filePath: string): string {
   return filePath.replace(/^\/?support-tickets\//, "");
 }
 
+function isWithinTenantFolder(path: string, tenantId: string): boolean {
+  return path.startsWith(`${tenantId}/`) && !path.split("/").includes("..");
+}
+
 // file_path is host-supplied; without this a caller could record, sign or delete another tenant's object.
 function tenantStoragePath(filePath: string, tenantId: string): string {
   const path = storagePath(filePath);
-  if (!path.startsWith(`${tenantId}/`) || path.split("/").includes("..")) {
+  if (!isWithinTenantFolder(path, tenantId)) {
     throw new Error("Attachment path is outside the tenant's storage folder");
   }
   return path;
@@ -55,6 +59,7 @@ export function createSupportAttachmentStore(
 ): SupportAttachmentStore {
   const table = () => client.from("support_ticket_attachments") as any;
   const tickets = () => client.from("support_tickets") as any;
+  const threads = () => client.from("support_ticket_threads") as any;
 
   return {
     async list(ticketId, threadId) {
@@ -94,10 +99,24 @@ export function createSupportAttachmentStore(
         throw new Error("Ticket not found");
       }
 
+      // thread_id is host-supplied; without this a caller could attach a
+      // file to another tenant's thread by id alone.
+      if (input.thread_id) {
+        const { data: thread } = await threads()
+          .select("id")
+          .eq("id", input.thread_id)
+          .eq("ticket_id", input.ticket_id)
+          .eq("tenant_id", tenantId)
+          .single();
+        if (!thread) {
+          throw new Error("Thread not found");
+        }
+      }
+
       const { data, error } = await table()
         .insert({
           ticket_id: input.ticket_id,
-          thread_id: input.thread_id ?? null,
+          thread_id: input.thread_id || null,
           tenant_id: tenantId,
           file_name: input.file_name,
           file_path: input.file_path,
@@ -119,12 +138,17 @@ export function createSupportAttachmentStore(
         .single();
 
       if (attachment) {
-        const { error: storageError } = await client.storage
-          .from(BUCKET)
-          .remove([tenantStoragePath((attachment as { file_path: string }).file_path, tenantId)]);
-        if (storageError) {
-          console.error("Failed to delete file from storage:", storageError);
-          // Continue with database deletion even if storage deletion fails.
+        const path = storagePath((attachment as { file_path: string }).file_path);
+        if (isWithinTenantFolder(path, tenantId)) {
+          const { error: storageError } = await client.storage.from(BUCKET).remove([path]);
+          if (storageError) {
+            console.error("Failed to delete file from storage:", storageError);
+            // Continue with database deletion even if storage deletion fails.
+          }
+        } else {
+          // Legacy row from before paths were confined to the tenant's folder — delete
+          // the DB record, but there is no safe bucket-relative path to remove.
+          console.warn("Skipping storage delete for a legacy attachment path outside the tenant's folder:", path);
         }
       }
 
@@ -140,9 +164,14 @@ export function createSupportAttachmentStore(
         .single();
       if (!attachment) return null;
 
-      const { data } = await client.storage
-        .from(BUCKET)
-        .createSignedUrl(tenantStoragePath((attachment as { file_path: string }).file_path, tenantId), expiresIn);
+      const path = storagePath((attachment as { file_path: string }).file_path);
+      if (!isWithinTenantFolder(path, tenantId)) {
+        // Legacy row outside the tenant's folder — no safe path to sign.
+        console.warn("Refusing to sign a legacy attachment path outside the tenant's folder:", path);
+        return null;
+      }
+
+      const { data } = await client.storage.from(BUCKET).createSignedUrl(path, expiresIn);
       return data?.signedUrl ?? null;
     },
   };

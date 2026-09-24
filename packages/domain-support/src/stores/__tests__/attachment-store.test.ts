@@ -40,6 +40,67 @@ describe("createSupportAttachmentStore", () => {
     expect(insertArgs.thread_id).toBeNull();
   });
 
+  it("create() verifies thread_id belongs to the ticket in this tenant, then inserts", async () => {
+    const { client, calls } = createMockSupabase([
+      { data: { id: "t-1" } },
+      { data: { id: "th-1" } },
+      { data: attachmentRow({ thread_id: "th-1" }) },
+    ]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    const created = await store.create({
+      ticket_id: "t-1",
+      thread_id: "th-1",
+      file_name: "log.txt",
+      file_path: "support-tickets/ten-1/t-1/log.txt",
+      file_size: 12,
+      mime_type: "text/plain",
+      uploaded_by: "user-1",
+    });
+
+    expect(created.thread_id).toBe("th-1");
+    expect(calls.filter((c) => c.op === "from").map((c) => c.args[0])).toEqual([
+      "support_tickets",
+      "support_ticket_threads",
+      "support_ticket_attachments",
+    ]);
+  });
+
+  it("create() rejects when thread_id does not belong to the ticket in this tenant", async () => {
+    const { client } = createMockSupabase([{ data: { id: "t-1" } }, { data: null }]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    await expect(
+      store.create({
+        ticket_id: "t-1",
+        thread_id: "th-9",
+        file_name: "log.txt",
+        file_path: "support-tickets/ten-1/t-1/log.txt",
+        file_size: 12,
+        mime_type: "text/plain",
+        uploaded_by: "user-1",
+      }),
+    ).rejects.toThrow("Thread not found");
+  });
+
+  it("create() normalizes an empty-string thread_id to null (uuid column rejects '')", async () => {
+    const { client, calls } = createMockSupabase([{ data: { id: "t-1" } }, { data: attachmentRow() }]);
+    const store = createSupportAttachmentStore(client, TENANT);
+
+    await store.create({
+      ticket_id: "t-1",
+      thread_id: "",
+      file_name: "log.txt",
+      file_path: "support-tickets/ten-1/t-1/log.txt",
+      file_size: 12,
+      mime_type: "text/plain",
+      uploaded_by: "user-1",
+    });
+
+    const insertArgs = calls.find((c) => c.op === "insert")?.args[0] as Record<string, unknown>;
+    expect(insertArgs.thread_id).toBeNull();
+  });
+
   it("create() rejects when the ticket does not exist in this tenant", async () => {
     const { client } = createMockSupabase([{ data: null }]);
     const store = createSupportAttachmentStore(client, TENANT);
@@ -118,19 +179,20 @@ describe("createSupportAttachmentStore", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("getDownloadUrl() refuses to sign a stored path outside the tenant's folder", async () => {
+  it("getDownloadUrl() returns null for a legacy attachment path outside the tenant's folder", async () => {
     const { client, calls } = createMockSupabase([{ data: { file_path: "support-tickets/ten-2/t-9/secret.pdf" } }]);
     const store = createSupportAttachmentStore(client, TENANT);
 
-    await expect(store.getDownloadUrl("a-1")).rejects.toThrow("outside the tenant's storage folder");
+    await expect(store.getDownloadUrl("a-1")).resolves.toBeNull();
     expect(calls.some((c) => c.op === "storage.createSignedUrl")).toBe(false);
   });
 
-  it("remove() refuses to delete a stored object outside the tenant's folder", async () => {
+  it("remove() skips the storage delete for a legacy path outside the tenant's folder, but still deletes the row", async () => {
     const { client, calls } = createMockSupabase([{ data: { file_path: "support-tickets/ten-2/t-9/secret.pdf" } }]);
     const store = createSupportAttachmentStore(client, TENANT);
 
-    await expect(store.remove("a-1")).rejects.toThrow("outside the tenant's storage folder");
+    await expect(store.remove("a-1")).resolves.toBeUndefined();
     expect(calls.some((c) => c.op === "storage.remove")).toBe(false);
+    expect(calls.some((c) => c.op === "delete")).toBe(true);
   });
 });
