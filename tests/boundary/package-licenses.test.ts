@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-const packages = ["schema-crm", "domain-contacts", "domain-campaigns", "ui-crm"];
+const packages = ["schema-crm", "schema-support", "domain-contacts", "domain-campaigns", "ui-crm"];
 
 describe("CRM package licenses", () => {
   for (const name of packages) {
