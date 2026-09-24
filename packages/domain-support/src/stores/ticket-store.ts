@@ -51,6 +51,22 @@ export interface SupportTicketStore {
 
 export function createSupportTicketStore(client: SupabaseClient, tenantId: string): SupportTicketStore {
   const table = () => client.from("support_tickets") as any;
+  const categories = () => client.from("support_categories") as any;
+
+  // category_id is host-supplied; a foreign key only proves the row exists
+  // somewhere, not that it belongs to this tenant (TICKET_SELECT embeds
+  // category:support_categories(*), so an unchecked id would let a
+  // service-role client link and read another tenant's category).
+  async function assertCategoryBelongsToTenant(categoryId: string) {
+    const { data } = await categories()
+      .select("id")
+      .eq("id", categoryId)
+      .eq("tenant_id", tenantId)
+      .single();
+    if (!data) {
+      throw new Error("Category not found");
+    }
+  }
 
   return {
     async list(query = {}) {
@@ -97,6 +113,10 @@ export function createSupportTicketStore(client: SupabaseClient, tenantId: strin
     },
 
     async create(input) {
+      if (input.category_id) {
+        await assertCategoryBelongsToTenant(input.category_id);
+      }
+
       const { data, error } = await table()
         .insert({
           tenant_id: tenantId,
@@ -116,6 +136,10 @@ export function createSupportTicketStore(client: SupabaseClient, tenantId: strin
     },
 
     async update(id, input) {
+      if (input.category_id) {
+        await assertCategoryBelongsToTenant(input.category_id);
+      }
+
       const updateData: Record<string, unknown> = {};
       if (input.subject !== undefined) updateData.subject = input.subject;
       if (input.description !== undefined) updateData.description = input.description;

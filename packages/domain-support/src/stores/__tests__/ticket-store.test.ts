@@ -78,6 +78,37 @@ describe("createSupportTicketStore", () => {
     expect(insertArgs).not.toHaveProperty("ticket_number");
   });
 
+  it("create() rejects a category_id that does not belong to the tenant", async () => {
+    const { client } = createMockSupabase([{ data: null }]);
+    const store = createSupportTicketStore(client, TENANT);
+
+    await expect(
+      store.create({ subject: "x", created_by: "user-1", category_id: "cat-2" }),
+    ).rejects.toThrow("Category not found");
+  });
+
+  it("create() verifies category_id belongs to the tenant before inserting", async () => {
+    const { client, calls } = createMockSupabase([
+      { data: { id: "cat-1" } },
+      { data: row({ category_id: "cat-1" }) },
+    ]);
+    const store = createSupportTicketStore(client, TENANT);
+
+    await store.create({ subject: "x", created_by: "user-1", category_id: "cat-1" });
+
+    expect(calls.filter((c) => c.op === "from").map((c) => c.args[0])).toEqual([
+      "support_categories",
+      "support_tickets",
+    ]);
+  });
+
+  it("update() rejects a category_id that does not belong to the tenant", async () => {
+    const { client } = createMockSupabase([{ data: null }]);
+    const store = createSupportTicketStore(client, TENANT);
+
+    await expect(store.update("t-1", { category_id: "cat-2" })).rejects.toThrow("Category not found");
+  });
+
   it("update() sends only the defined fields and scopes to id + tenant", async () => {
     const { client, calls } = createMockSupabase({ data: row({ status: "resolved" }) });
     const store = createSupportTicketStore(client, TENANT);

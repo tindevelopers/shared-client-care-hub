@@ -55,6 +55,7 @@ export function createSupportAttachmentStore(
 ): SupportAttachmentStore {
   const table = () => client.from("support_ticket_attachments") as any;
   const tickets = () => client.from("support_tickets") as any;
+  const threads = () => client.from("support_ticket_threads") as any;
 
   return {
     async list(ticketId, threadId) {
@@ -92,6 +93,20 @@ export function createSupportAttachmentStore(
         .single();
       if (!ticket) {
         throw new Error("Ticket not found");
+      }
+
+      // thread_id is host-supplied; without this a caller could attach a
+      // file to another tenant's thread by id alone.
+      if (input.thread_id) {
+        const { data: thread } = await threads()
+          .select("id")
+          .eq("id", input.thread_id)
+          .eq("ticket_id", input.ticket_id)
+          .eq("tenant_id", tenantId)
+          .single();
+        if (!thread) {
+          throw new Error("Thread not found");
+        }
       }
 
       const { data, error } = await table()
