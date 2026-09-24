@@ -33,9 +33,18 @@ the public API a consumer must account for on upgrade:
 - **Attachment paths must sit inside the tenant's storage folder**
   (`<tenantId>/…`, optionally prefixed `support-tickets/`, no `..`
   segments). `createSupportAttachmentStore().create` rejects any other
-  `file_path` before touching the database, and `remove`/`getDownloadUrl`
-  refuse to delete or sign a stored path outside the folder. The
-  core-kernel version accepted any host-supplied path.
+  `file_path` before touching the database. (`remove`/`getDownloadUrl`'s
+  handling of an existing out-of-folder path is covered below, under
+  Fixed — they degrade gracefully rather than throwing.) The core-kernel
+  version accepted any host-supplied path.
+- **`SupportTicket`'s `support_code`, `support_ref`, and
+  `escalated_to_platform_admin_at` move from optional to required-and-
+  nullable** (`string | null`, always present), matching the
+  `@tindevelopers/schema-support` row exactly now that `SupportTicket`
+  extends it directly. `external_refs`/`sync_state` also newly appear on
+  the type, as optional (`schema-support`'s `tickets.ts` doc comment
+  explains why: the migration that creates those two columns is not
+  shipped by that package).
 - **`SupportTenantContext` drops `isSystemOperator`/`firstAvailableTenantId`,
   and `resolveSupportTenantId` no longer falls back to an arbitrary tenant
   for system operators.** The old fallback let a platform-operator caller
@@ -47,6 +56,41 @@ the public API a consumer must account for on upgrade:
   The `"No tenants found"` (system-operator, no tenant) error message is
   removed entirely; the remaining `"No tenant found"` message and its prefix
   contract are unchanged.
+
+### Fixed
+
+Found in post-merge review of the store port above; behavior changes a
+consumer may notice:
+
+- **Cross-tenant category/thread references.** `createSupportTicketStore().create`/
+  `.update` now verify a supplied `category_id` belongs to the bound tenant
+  before writing it, and `createSupportAttachmentStore().create` does the
+  same for `thread_id` (throwing `"Category not found"` / `"Thread not
+  found"` otherwise). A foreign key alone only proves the row exists
+  somewhere; previously a cross-tenant id was accepted and readable back
+  through `TICKET_SELECT`'s `category:support_categories(*)` join.
+- **Empty-string optional fields.** `create()` on the ticket, attachment,
+  and category stores again treats `''` as `null` for optional uuid/text
+  fields (ticket `description`/`category_id`/`assigned_to`/`support_code`/
+  `support_ref`, attachment `thread_id`, category `description`), matching
+  the core-kernel original. The initial port used `?? null`, which let an
+  empty string reach a uuid column and fail at the database.
+- **Internal-note attachments leaking.** `createSupportStore(...).listAttachments`
+  now excludes attachments on internal (`is_internal`) threads, matching
+  `listThreads`'s existing behavior. The lower-level
+  `createSupportAttachmentStore().list` is unchanged (agent-side callers
+  may still need everything).
+- **`NULL` `is_internal` hidden from thread lists.** `createSupportThreadStore().list`
+  now treats a `NULL` `is_internal` the same as `false` (not internal); it
+  previously hid such rows entirely because the column is nullable and the
+  filter used `.eq("is_internal", false)`.
+- **Legacy attachment paths.** `createSupportAttachmentStore().remove`/
+  `.getDownloadUrl` no longer throw for a stored `file_path` outside the
+  tenant's folder. `remove` still deletes the tenant-scoped row (skipping
+  only the storage delete, with a logged warning); `getDownloadUrl` returns
+  `null`. This unblocks legacy rows written before paths were confined to
+  the tenant's folder. `create` is unchanged and still rejects an
+  out-of-folder path outright.
 
 ## 2.0.1
 
