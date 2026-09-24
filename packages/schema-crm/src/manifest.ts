@@ -9,11 +9,20 @@ export const CRM_TABLE_NAMES = [
   "contact_suppressions",
   "campaigns",
   "campaign_recipients",
+  "campaign_lists",
+  "campaign_events",
   "contact_sync_log",
   "sync_state",
   "field_mappings",
   "processed_external_events",
   "conversation_turns",
+  "companies",
+  "deal_stages",
+  "deals",
+  "tasks",
+  "notes",
+  "activities",
+  "brevo_webhook_events",
 ] as const;
 
 export type CrmTableName = (typeof CRM_TABLE_NAMES)[number];
@@ -35,6 +44,7 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
   contacts: {
     migrations: [
       "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
       "20260320100000_add_contact_sync_tracking.sql",
       "20260614120000_create_conversation_tables.sql",
       "20260614230000_brevo_webhooks_activities_suppression.sql",
@@ -83,6 +93,12 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
       "20260919013000_atomic_campaign_recipient_replacement.sql",
     ],
   },
+  campaign_lists: {
+    migrations: ["20260210000000_create_campaign_tables.sql"],
+  },
+  campaign_events: {
+    migrations: ["20260210000000_create_campaign_tables.sql"],
+  },
   contact_sync_log: {
     migrations: ["20260320100000_add_contact_sync_tracking.sql"],
   },
@@ -100,6 +116,45 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
       "20260614120000_create_conversation_tables.sql",
       "20260615000002_fix_multiturn_sms_constraints.sql",
     ],
+  },
+  companies: {
+    migrations: [
+      "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
+    ],
+  },
+  deal_stages: {
+    migrations: [
+      "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
+    ],
+  },
+  deals: {
+    migrations: [
+      "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
+    ],
+  },
+  tasks: {
+    migrations: [
+      "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
+    ],
+  },
+  notes: {
+    migrations: [
+      "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
+    ],
+  },
+  activities: {
+    migrations: [
+      "20251208000000_create_crm_tables.sql",
+      "20251208000001_fix_crm_rls_recursion.sql",
+    ],
+  },
+  brevo_webhook_events: {
+    migrations: ["20260614230000_brevo_webhooks_activities_suppression.sql"],
   },
 };
 
