@@ -23,7 +23,16 @@ export function createSupportStore(client: SupabaseClient, tenantId: string): Su
     updateTicket: (id, input) => tickets.update(id, input),
     listThreads: (ticketId) => threads.list(ticketId),
     appendThread: (input) => threads.create(input),
-    listAttachments: (ticketId) => attachments.list(ticketId),
+    listAttachments: async (ticketId) => {
+      // listThreads() already hides internal threads; an attachment on one
+      // must be hidden the same way, so cross-reference the tenant-scoped
+      // thread store rather than trusting attachments.list() (which returns
+      // everything for agent-side callers).
+      const allThreads = await threads.list(ticketId, { includeInternal: true });
+      const items = await attachments.list(ticketId);
+      const internalThreadIds = new Set(allThreads.filter((t) => t.is_internal).map((t) => t.id));
+      return items.filter((a) => !a.thread_id || !internalThreadIds.has(a.thread_id));
+    },
     listCategories: () => categories.list(),
     saveCategory: (input: SaveCategoryInput) =>
       input.id ? categories.update(input.id, input) : categories.create(input),
