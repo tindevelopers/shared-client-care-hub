@@ -179,19 +179,20 @@ describe("createSupportAttachmentStore", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("getDownloadUrl() refuses to sign a stored path outside the tenant's folder", async () => {
+  it("getDownloadUrl() returns null for a legacy attachment path outside the tenant's folder", async () => {
     const { client, calls } = createMockSupabase([{ data: { file_path: "support-tickets/ten-2/t-9/secret.pdf" } }]);
     const store = createSupportAttachmentStore(client, TENANT);
 
-    await expect(store.getDownloadUrl("a-1")).rejects.toThrow("outside the tenant's storage folder");
+    await expect(store.getDownloadUrl("a-1")).resolves.toBeNull();
     expect(calls.some((c) => c.op === "storage.createSignedUrl")).toBe(false);
   });
 
-  it("remove() refuses to delete a stored object outside the tenant's folder", async () => {
+  it("remove() skips the storage delete for a legacy path outside the tenant's folder, but still deletes the row", async () => {
     const { client, calls } = createMockSupabase([{ data: { file_path: "support-tickets/ten-2/t-9/secret.pdf" } }]);
     const store = createSupportAttachmentStore(client, TENANT);
 
-    await expect(store.remove("a-1")).rejects.toThrow("outside the tenant's storage folder");
+    await expect(store.remove("a-1")).resolves.toBeUndefined();
     expect(calls.some((c) => c.op === "storage.remove")).toBe(false);
+    expect(calls.some((c) => c.op === "delete")).toBe(true);
   });
 });
