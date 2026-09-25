@@ -1,8 +1,8 @@
 # @tindevelopers/domain-pipeline
 
-CRM pipeline domain: injected data-access stores for the six pipeline tables
-(typed from `@tindevelopers/schema-crm`) — companies, deal stages, deals,
-tasks, notes, and activities.
+CRM pipeline domain: injected data-access stores for the seven pipeline
+tables (typed from `@tindevelopers/schema-crm`) — companies, deal stages,
+deals, tasks, notes, activities, and custom field definitions.
 
 Injection-only (R2): every store factory takes a `SupabaseClient` and a
 `tenantId` and binds every query to that tenant; the package never
@@ -21,7 +21,8 @@ arguments the host resolves and injects.
 | `createTaskStore(client, tenantId)` | `list` / `get` / `create` / `update` / `remove` / `bulkRemove` / `bulkComplete` |
 | `createNoteStore(client, tenantId)` | `list` / `create` / `update` / `remove` |
 | `createActivityStore(client, tenantId)` | `list` / `create` / `logEntityCreated` / `logEntityUpdated` / `logEntityDeleted` / `logNoteAdded` |
-| `createPipelineStore(client, tenantId)` | Composes the six stores above into one entry point, keyed `companies` / `dealStages` / `deals` / `tasks` / `notes` / `activities` |
+| `createCustomFieldStore(client, tenantId)` | `list(entity?)` / `get` / `create` / `update` / `remove` |
+| `createPipelineStore(client, tenantId)` | Composes the seven stores above into one entry point, keyed `companies` / `dealStages` / `deals` / `tasks` / `notes` / `activities` / `customFields` |
 
 `id`, `created_at`, and `updated_at` (where the table has one) are always
 DB-owned — no store ever synthesizes them.
@@ -69,6 +70,18 @@ its stages, plus a separate `seedDefaults()` that inserts the same six
 names/colors (`Lead`, `Qualified`, `Proposal`, `Negotiation`, `Won`, `Lost`)
 only for a tenant that has none yet — a one-time bootstrap, not the only
 path going forward.
+
+## Custom field definitions
+
+`createCustomFieldStore`, ported from Konnect's
+`apps/ops/app/actions/crm/custom-fields.ts`, is per-tenant admin
+configuration for extra fields on contacts/companies/deals — not linked to a
+specific record, the same shape as `createDealStageStore`. `list()` orders
+by `position` then `key`, matching Konnect's ordering, and takes an optional
+`entity` filter (`"contact" | "company" | "deal"`). `create()` defaults
+`options` to `[]`, `required` to `false`, and `position` to `0` when the
+caller omits them, mirroring the table's own DB defaults. No cross-tenant
+reference check applies here: the only foreign key is `tenant_id` itself.
 
 ## Activity logging
 

@@ -4,4 +4,5 @@ export * from "./deal-stage-store.js";
 export * from "./deal-store.js";
 export * from "./task-store.js";
 export * from "./note-store.js";
+export * from "./custom-field-store.js";
 export * from "./pipeline-store.js";

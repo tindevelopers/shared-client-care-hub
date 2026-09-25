@@ -50,3 +50,9 @@ into a shared hub package, following the pattern `domain-contacts` and
   (via `.select("id")` on the tenant-scoped mutation), not the length of the
   input id array — Konnect's `bulkCompleteTasks` returned `ids.length`
   regardless of how many ids actually belonged to the tenant.
+- **New: `createCustomFieldStore`**, ported from Konnect's
+  `apps/ops/app/actions/crm/custom-fields.ts` (per-tenant admin-defined
+  extra fields on contacts/companies/deals). `list(entity?)` / `get` /
+  `create` / `update` / `remove`, typed from `@tindevelopers/schema-crm`'s
+  `CustomFieldDefinitionRow`/`Insert`/`Update`. Added to `createPipelineStore`
+  as `customFields`, alongside the six existing stores.
