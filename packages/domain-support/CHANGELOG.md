@@ -7,6 +7,29 @@ This package now owns the support data layer instead of depending on
 `@tindevelopers/core-kernel/support`; the following are breaking changes to
 the public API a consumer must account for on upgrade:
 
+- **`@tindevelopers/schema-support` adopts Konnect's owner-scoped support
+  escalation chain** (ADR-0002 schema ownership; ground truth
+  `20260924100000_support_owner_escalation.sql` and friends — see that
+  package's changelog for the full column-level list). The rows this
+  package's types derive from change shape as a result:
+  - `SupportTicket`/`SupportCategory`/`SupportTicketThread`/
+    `SupportTicketAttachment`'s `tenant_id` **widens from required to
+    nullable** (`string | null`) — a partner- or platform-owned row has no
+    tenant. `SupportNotification.tenantId` follows the same widening.
+  - **`SupportTicketRow.escalated_to_platform_admin_at` is removed** (the
+    column is dropped from `support_tickets`; platform escalation now goes
+    through `owner_scope = 'platform'` and Konnect's escalation gateway
+    functions, not this column). `SupportTicket` keeps the field as a
+    domain-only, optional compatibility property so the existing
+    escalation-notification path (`tickets.ts`/`notifications.ts`) keeps
+    working unchanged; redesigning that path onto the owner-scope gateway is
+    a later step, out of scope here.
+  - **`createCounterpartyTicketStore` is removed** (see Removed, below) —
+    the two tables it was built on are retired upstream.
+  - The stores in this package (`createSupportTicketStore` and friends) are
+    **not** redesigned to be owner-scope aware in this change; they still
+    read/write `support_tickets` et al. exactly as before, scoped only by
+    `tenantId`. Owner-scope-aware stores are a later step.
 - **`SupportStore.saveTicket(ticket)` is removed**, replaced by
   `createTicket(input: CreateSupportTicketInput)` and
   `updateTicket(id, input: UpdateTicketInput)`. The old contract required
@@ -57,21 +80,20 @@ the public API a consumer must account for on upgrade:
   removed entirely; the remaining `"No tenant found"` message and its prefix
   contract are unchanged.
 
-### Added
+### Removed
 
-- **`createCounterpartyTicketStore(client, partnerId)`** (`./stores`) — a new,
-  separate top-level entry point for Konnect's partner-facing ticket queue
-  (`partner_support_tickets`/`partner_support_ticket_replies`, from
-  `@tindevelopers/schema-support`). This is additive, non-breaking new
-  surface: a genuinely different actor relationship from the tenant-scoped
-  `createSupportTicketStore` (an agency filing a ticket with the platform,
-  scoped by `partnerId`, vs. a tenant's end customer filing one with the
-  tenant). It is deliberately not composed into `createSupportStore`/
-  `SupportStore` or exported from `support-store.ts` — same `list`/`get`/
-  `create`/`update`/`remove` shape as `createSupportTicketStore`, plus a
-  nested `replies` sub-store (`list`/`create`) for
-  `partner_support_ticket_replies`, which has no `partner_id` column of its
-  own and is scoped through its parent ticket instead.
+- **`createCounterpartyTicketStore(client, partnerId)`** (`./stores`),
+  along with its types (`CounterpartyTicket`, `CounterpartyTicketReply`,
+  `CounterpartyTicketStore`, etc.) — the store for Konnect's partner-facing
+  ticket queue (`partner_support_tickets`/`partner_support_ticket_replies`).
+  This package's Unreleased log previously listed adding this store; it is
+  removed here, in the same Unreleased window, before ever shipping: those
+  two tables are now retired upstream — "no production data of substance,
+  confirmed 2026-09-24" per
+  `20260924100000_support_owner_escalation.sql`'s header — so the store built
+  on them is dropped rather than left pointing at dropped tables.
+  Partner-owned tickets now live in `support_tickets` with `owner_scope =
+  'partner'`; a store for that shape is a later step.
 
 ### Fixed
 

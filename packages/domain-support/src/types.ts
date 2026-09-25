@@ -31,6 +31,17 @@ export interface SupportUserRef {
 export type SupportCategory = SupportCategoryRow;
 
 export interface SupportTicket extends SupportTicketRow {
+  /**
+   * `escalated_to_platform_admin_at` was dropped from `support_tickets` by
+   * schema-support's `20260924100000_support_owner_escalation.sql` (Support
+   * Escalation Chain: platform escalation now goes through
+   * `owner_scope = 'platform'` and the `support_escalate` gateway function,
+   * not this column). Kept here, domain-side only, so the existing
+   * escalation-notification path in `tickets.ts`/`notifications.ts` keeps
+   * compiling unchanged; redesigning that path onto the owner-scope gateway
+   * is a later step, not part of this schema adoption.
+   */
+  escalated_to_platform_admin_at?: string | null;
   category?: SupportCategory | null;
   created_by_user?: SupportUserRef | null;
   assigned_to_user?: SupportUserRef | null;

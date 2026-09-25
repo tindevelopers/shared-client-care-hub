@@ -10,11 +10,13 @@ const TENANT = "9a1b2c3d-0000-4000-8000-000000000010";
 const TICKET = "9a1b2c3d-0000-4000-8000-000000000001";
 const USER = "9a1b2c3d-0000-4000-8000-000000000011";
 
-/** Ground-truth fixture: support_ticket_history DDL (20251221000000). */
+/** Ground-truth fixture: support_ticket_history composite DDL (2 migrations). */
 const historyFixture = {
   id: "9a1b2c3d-0000-4000-8000-000000000004",
   ticket_id: TICKET,
   tenant_id: TENANT,
+  partner_id: null,
+  owner_scope: "tenant",
   changed_by: USER,
   field_name: "status",
   old_value: "open",
@@ -23,12 +25,14 @@ const historyFixture = {
 };
 
 describe("support_ticket_history", () => {
-  it("row round-trip (8 columns, no updated_at)", () => {
+  it("row round-trip (10 columns, no updated_at)", () => {
     expect(Object.keys(supportTicketHistoryRowSchema.shape).sort()).toEqual(
       [
         "id",
         "ticket_id",
         "tenant_id",
+        "partner_id",
+        "owner_scope",
         "changed_by",
         "field_name",
         "old_value",
@@ -47,10 +51,21 @@ describe("support_ticket_history", () => {
     ).toBe(false);
   });
 
-  it("field_name is free-form TEXT (no CHECK constraint in the DDL)", () => {
+  it("owner_scope rejects a value outside tenant/partner/platform", () => {
     expect(
-      supportTicketHistoryRowSchema.safeParse({ ...historyFixture, field_name: "anything" })
-        .success,
+      supportTicketHistoryRowSchema.safeParse({ ...historyFixture, owner_scope: "bogus" }).success,
+    ).toBe(false);
+  });
+
+  it("changed_by is nullable (20260924100000 — the rewritten trigger writes NULL for a system actor)", () => {
+    expect(
+      supportTicketHistoryRowSchema.safeParse({ ...historyFixture, changed_by: null }).success,
+    ).toBe(true);
+  });
+
+  it("field_name is free-form TEXT (no CHECK constraint in the DDL) — accepts the new group_id value", () => {
+    expect(
+      supportTicketHistoryRowSchema.safeParse({ ...historyFixture, field_name: "group_id" }).success,
     ).toBe(true);
   });
 
@@ -64,11 +79,9 @@ describe("support_ticket_history", () => {
     ).toBe(true);
   });
 
-  it("insert requires ticket_id, tenant_id, changed_by, field_name only", () => {
+  it("insert requires ticket_id, field_name only — tenant_id/changed_by are nullable, owner_scope is trigger-owned", () => {
     const required = {
       ticket_id: TICKET,
-      tenant_id: TENANT,
-      changed_by: USER,
       field_name: "status",
     };
     expect(supportTicketHistoryInsertSchema.safeParse(required).success).toBe(true);

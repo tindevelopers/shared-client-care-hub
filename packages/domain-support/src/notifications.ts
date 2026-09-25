@@ -26,7 +26,8 @@ export interface SupportNotification {
   type: SupportNotificationType;
   recipient: SupportNotificationRecipient;
   ticketId: string;
-  tenantId: string;
+  /** `null` for a partner- or platform-owned ticket (schema-support 20260924100000). */
+  tenantId: string | null;
   subject: string;
   html: string;
   text: string;
@@ -181,11 +182,11 @@ export function buildTicketEscalatedNotifications(ticket: SupportTicket): Suppor
         <p>A support ticket has been escalated to platform admin.</p>
         <p><strong>Ticket:</strong> ${escapeHtml(ticket.ticket_number)}</p>
         <p><strong>Subject:</strong> ${escapeHtml(ticket.subject)}</p>
-        <p><strong>Tenant ID:</strong> ${escapeHtml(ticket.tenant_id)}</p>
+        <p><strong>Tenant ID:</strong> ${escapeHtml(ticket.tenant_id ?? "(none)")}</p>
         ${supportCode}
         <p>Please review the ticket in the support dashboard.</p>
       `,
-      text: `Ticket ${ticket.ticket_number} (${ticket.subject}) has been escalated. Tenant: ${ticket.tenant_id}.`,
+      text: `Ticket ${ticket.ticket_number} (${ticket.subject}) has been escalated. Tenant: ${ticket.tenant_id ?? "(none)"}.`,
     }),
   ];
 }
