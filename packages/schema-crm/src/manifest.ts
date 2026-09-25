@@ -23,6 +23,7 @@ export const CRM_TABLE_NAMES = [
   "notes",
   "activities",
   "brevo_webhook_events",
+  "custom_field_definitions",
 ] as const;
 
 export type CrmTableName = (typeof CRM_TABLE_NAMES)[number];
@@ -155,6 +156,9 @@ export const tables: Record<CrmTableName, CrmTableInfo> = {
   },
   brevo_webhook_events: {
     migrations: ["20260614230000_brevo_webhooks_activities_suppression.sql"],
+  },
+  custom_field_definitions: {
+    migrations: ["20260603100000_create_custom_field_definitions.sql"],
   },
 };
 
