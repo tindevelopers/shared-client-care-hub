@@ -9,7 +9,15 @@ describe("createPipelineStore", () => {
     const { client } = createMockSupabase();
     const store = createPipelineStore(client, TENANT);
 
-    for (const key of ["companies", "dealStages", "deals", "tasks", "notes", "activities"] as const) {
+    for (const key of [
+      "companies",
+      "dealStages",
+      "deals",
+      "tasks",
+      "notes",
+      "activities",
+      "customFields",
+    ] as const) {
       expect(store[key]).toBeTruthy();
     }
     expect(store.companies.list).toBeInstanceOf(Function);
@@ -18,5 +26,6 @@ describe("createPipelineStore", () => {
     expect(store.tasks.bulkComplete).toBeInstanceOf(Function);
     expect(store.notes.create).toBeInstanceOf(Function);
     expect(store.activities.logEntityCreated).toBeInstanceOf(Function);
+    expect(store.customFields.list).toBeInstanceOf(Function);
   });
 });

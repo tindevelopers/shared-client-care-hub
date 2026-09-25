@@ -57,6 +57,22 @@ the public API a consumer must account for on upgrade:
   removed entirely; the remaining `"No tenant found"` message and its prefix
   contract are unchanged.
 
+### Added
+
+- **`createCounterpartyTicketStore(client, partnerId)`** (`./stores`) — a new,
+  separate top-level entry point for Konnect's partner-facing ticket queue
+  (`partner_support_tickets`/`partner_support_ticket_replies`, from
+  `@tindevelopers/schema-support`). This is additive, non-breaking new
+  surface: a genuinely different actor relationship from the tenant-scoped
+  `createSupportTicketStore` (an agency filing a ticket with the platform,
+  scoped by `partnerId`, vs. a tenant's end customer filing one with the
+  tenant). It is deliberately not composed into `createSupportStore`/
+  `SupportStore` or exported from `support-store.ts` — same `list`/`get`/
+  `create`/`update`/`remove` shape as `createSupportTicketStore`, plus a
+  nested `replies` sub-store (`list`/`create`) for
+  `partner_support_ticket_replies`, which has no `partner_id` column of its
+  own and is scoped through its parent ticket instead.
+
 ### Fixed
 
 Found in post-merge review of the store port above; behavior changes a

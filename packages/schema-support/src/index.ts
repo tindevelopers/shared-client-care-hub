@@ -5,6 +5,7 @@ export * from "./tickets.js";
 export * from "./threads.js";
 export * from "./attachments.js";
 export * from "./history.js";
+export * from "./partner-tickets.js";
 export {
   SUPPORT_TABLE_NAMES,
   supportManifest,

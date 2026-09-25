@@ -3,6 +3,8 @@ import { createActivityStore } from "./activity-store.js";
 import type { ActivityStore } from "./activity-store.js";
 import { createCompanyStore } from "./company-store.js";
 import type { CompanyStore } from "./company-store.js";
+import { createCustomFieldStore } from "./custom-field-store.js";
+import type { CustomFieldStore } from "./custom-field-store.js";
 import { createDealStageStore } from "./deal-stage-store.js";
 import type { DealStageStore } from "./deal-stage-store.js";
 import { createDealStore } from "./deal-store.js";
@@ -19,13 +21,14 @@ export interface PipelineStore {
   tasks: TaskStore;
   notes: NoteStore;
   activities: ActivityStore;
+  customFields: CustomFieldStore;
 }
 
 /**
- * Compose the six table-scoped stores into a single injected-client entry
+ * Compose the seven table-scoped stores into a single injected-client entry
  * point for the whole CRM pipeline data layer (companies, deal stages,
- * deals, tasks, notes, activities) — the same composition pattern
- * `domain-support`'s `createSupportStore` uses.
+ * deals, tasks, notes, activities, custom field definitions) — the same
+ * composition pattern `domain-support`'s `createSupportStore` uses.
  */
 export function createPipelineStore(client: SupabaseClient, tenantId: string): PipelineStore {
   return {
@@ -35,5 +38,6 @@ export function createPipelineStore(client: SupabaseClient, tenantId: string): P
     tasks: createTaskStore(client, tenantId),
     notes: createNoteStore(client, tenantId),
     activities: createActivityStore(client, tenantId),
+    customFields: createCustomFieldStore(client, tenantId),
   };
 }

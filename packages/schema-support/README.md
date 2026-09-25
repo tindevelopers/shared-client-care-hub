@@ -1,7 +1,7 @@
 # @tindevelopers/schema-support
 
 Zod schemas, row/insert/update types, manifest, and ground-truth migrations
-for the **five existing support-ticketing tables** — nothing speculative.
+for the **seven existing support-ticketing tables** — nothing speculative.
 
 ## Tables
 
@@ -12,12 +12,23 @@ for the **five existing support-ticketing tables** — nothing speculative.
 | `support_ticket_threads` | 8 | 20251221000000 |
 | `support_ticket_attachments` | 9 | 20251221000000 |
 | `support_ticket_history` | 8 | 20251221000000 |
+| `partner_support_tickets` | 10 | 20260913130000 |
+| `partner_support_ticket_replies` | 5 | 20260913130000 |
 
 Per ADR-0002 (shell-base-admin `docs/ADR-0002-schema-ownership.md`): a
 package's manifest must declare every table its own migrations create.
 `support_ticket_history` (the ticket audit log, written by the
 `track_ticket_history()` trigger) is created by this package's own base
 migration, so it is claimed here as a fifth owned table, not left out.
+
+`partner_support_tickets`/`partner_support_ticket_replies` are a separate,
+**actor-scoped** pair: keyed by `partner_id` (an agency filing a ticket with
+the platform), not `tenant_id`, per the design decision recorded for this
+shape (client-care domain shape at scale — "actor-scoped support"). They are
+modeled here alongside the tenant-scoped tables (both are owned by this
+package's migrations), but consumers should not conflate the two: see
+`@tindevelopers/domain-support`'s `createCounterpartyTicketStore`, which is a
+distinct entry point from `createSupportTicketStore`.
 
 Drift note: `is_active` (`support_categories`) and `is_internal`
 (`support_ticket_threads`) are `BOOLEAN DEFAULT ...` with no `NOT NULL` in the
@@ -47,7 +58,7 @@ DDL for a table it owns.
 | Subpath | Exports |
 |---|---|
 | `.` | all Zod schemas + row/insert/update types + enums |
-| `./manifest` | `supportManifest` — migrations dir + the five-table map |
+| `./manifest` | `supportManifest` — migrations dir + the seven-table map |
 
 ## Usage
 
@@ -56,7 +67,7 @@ import { supportTicketRowSchema, type SupportTicketRow } from "@tindevelopers/sc
 import { supportManifest } from "@tindevelopers/schema-support/manifest";
 
 const ticket: SupportTicketRow = supportTicketRowSchema.parse(rowFromPostgrest);
-console.log(Object.keys(supportManifest.tables)); // the five support tables
+console.log(Object.keys(supportManifest.tables)); // the seven support tables
 ```
 
 ## Migrations

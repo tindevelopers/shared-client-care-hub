@@ -30,6 +30,7 @@ const EXISTING_TABLES = [
   "contact_sync_log",
   "contacts",
   "conversation_turns",
+  "custom_field_definitions",
   "deal_stages",
   "deals",
   "field_mappings",

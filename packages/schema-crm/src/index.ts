@@ -13,6 +13,7 @@ export * from "./tasks.js";
 export * from "./notes.js";
 export * from "./activities.js";
 export * from "./brevo-webhook-events.js";
+export * from "./custom-field-definitions.js";
 export {
   CRM_TABLE_NAMES,
   crmManifest,

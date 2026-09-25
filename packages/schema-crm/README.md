@@ -29,6 +29,7 @@ nothing speculative.
 | `notes` | 12 | 20251208000000 + 20251208000001 (RLS) |
 | `activities` | 12 (`type` CHECK extended by 20260614230000 to 16 values) | 20251208000000 + 20251208000001 (RLS) + 20260614230000 |
 | `brevo_webhook_events` | 12 | 20260614230000 |
+| `custom_field_definitions` | 11 | 20260603100000 |
 
 Drift columns `lifecycle_stage`, `score`, and `do_not_contact` do **not** exist
 and are rejected by the strict row schemas. `contacts.ghl_contact_id` /
@@ -41,7 +42,9 @@ migration as `contacts`); `brevo_webhook_events`, `campaign_events`, and
 `campaign_lists` are created by this package's own migrations too. All nine
 were previously undeclared in the manifest — closed the same way ADR-0002
 closed the `conversation_turns` / `processed_external_events` gap: the tables
-already existed, only the manifest was missing them.
+already existed, only the manifest was missing them. `custom_field_definitions`
+is the same gap again: created by its own `20260603100000` migration, used by
+`apps/ops`, but never declared by this package until now.
 
 ## Subpath exports
 

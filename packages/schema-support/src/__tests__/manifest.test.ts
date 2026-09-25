@@ -12,14 +12,17 @@ const EXISTING_TABLES = [
   "support_ticket_threads",
   "support_ticket_attachments",
   "support_ticket_history",
+  "partner_support_tickets",
+  "partner_support_ticket_replies",
 ];
 
 describe("support manifest", () => {
-  it("manifest lists exactly the five owned tables", () => {
+  it("manifest lists exactly the seven owned tables", () => {
     // support_ticket_history is created by this package's own base migration
     // (20251221000000) — ADR-0002 requires the manifest to declare every
     // table a package's migrations create, so it is claimed here alongside
-    // the other four.
+    // the other four. partner_support_tickets/partner_support_ticket_replies
+    // are the actor-scoped pair added by 20260913130000.
     expect(Object.keys(supportManifest.tables).sort()).toEqual(EXISTING_TABLES.sort());
     expect(Object.keys(tables).sort()).toEqual(EXISTING_TABLES.sort());
     expect([...SUPPORT_TABLE_NAMES].sort()).toEqual(EXISTING_TABLES.sort());
