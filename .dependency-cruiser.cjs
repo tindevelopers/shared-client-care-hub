@@ -72,6 +72,54 @@ module.exports = {
       to: { path: "^(@tindevelopers/domain-support|packages/domain-support/)" },
     },
     {
+      name: "no-domain-pipeline-to-contacts",
+      comment:
+        "R5 — domain-pipeline must not import domain-contacts. Cross-domain " +
+        "communication goes through core-kernel/events or injected callbacks.",
+      severity: "error",
+      from: { path: "^packages/domain-pipeline/" },
+      to: { path: "^(@tindevelopers/domain-contacts|packages/domain-contacts/)" },
+    },
+    {
+      name: "no-domain-pipeline-to-contacts-reverse",
+      comment: "R5 — the reverse direction of no-domain-pipeline-to-contacts.",
+      severity: "error",
+      from: { path: "^packages/domain-contacts/" },
+      to: { path: "^(@tindevelopers/domain-pipeline|packages/domain-pipeline/)" },
+    },
+    {
+      name: "no-domain-pipeline-to-campaigns",
+      comment:
+        "R5 — domain-pipeline must not import domain-campaigns. Cross-domain " +
+        "communication goes through core-kernel/events or injected callbacks.",
+      severity: "error",
+      from: { path: "^packages/domain-pipeline/" },
+      to: { path: "^(@tindevelopers/domain-campaigns|packages/domain-campaigns/)" },
+    },
+    {
+      name: "no-domain-pipeline-to-campaigns-reverse",
+      comment: "R5 — the reverse direction of no-domain-pipeline-to-campaigns.",
+      severity: "error",
+      from: { path: "^packages/domain-campaigns/" },
+      to: { path: "^(@tindevelopers/domain-pipeline|packages/domain-pipeline/)" },
+    },
+    {
+      name: "no-domain-pipeline-to-support",
+      comment:
+        "R5 — domain-pipeline must not import domain-support. Cross-domain " +
+        "communication goes through core-kernel/events or injected callbacks.",
+      severity: "error",
+      from: { path: "^packages/domain-pipeline/" },
+      to: { path: "^(@tindevelopers/domain-support|packages/domain-support/)" },
+    },
+    {
+      name: "no-domain-pipeline-to-support-reverse",
+      comment: "R5 — the reverse direction of no-domain-pipeline-to-support.",
+      severity: "error",
+      from: { path: "^packages/domain-support/" },
+      to: { path: "^(@tindevelopers/domain-pipeline|packages/domain-pipeline/)" },
+    },
+    {
       name: "no-vendor-in-domain",
       comment:
         "R1 — a domain package imports a port from adapter-kit, never a vendor SDK. " +

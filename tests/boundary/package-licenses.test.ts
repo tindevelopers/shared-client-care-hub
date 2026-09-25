@@ -7,6 +7,7 @@ const packages = [
   "domain-contacts",
   "domain-campaigns",
   "domain-support",
+  "domain-pipeline",
   "ui-crm",
 ];
 
