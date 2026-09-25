@@ -4,7 +4,15 @@ export * from "./contacts.js";
 export * from "./contact-groups.js";
 export * from "./suppressions.js";
 export * from "./campaigns.js";
+export * from "./campaign-lists.js";
+export * from "./campaign-events.js";
 export * from "./sync.js";
+export * from "./companies.js";
+export * from "./deals.js";
+export * from "./tasks.js";
+export * from "./notes.js";
+export * from "./activities.js";
+export * from "./brevo-webhook-events.js";
 export {
   CRM_TABLE_NAMES,
   crmManifest,

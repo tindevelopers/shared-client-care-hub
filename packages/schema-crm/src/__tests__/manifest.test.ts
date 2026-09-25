@@ -10,9 +10,19 @@ const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 // processed_external_events as formally declared CRM tables: both were
 // already physically created by this package's own migrations, just not
 // previously listed in the manifest.
+//
+// Same gap, closed here for nine more tables: this package's own migrations
+// already create companies/deal_stages/deals/tasks/notes/activities
+// (20251208000000) and brevo_webhook_events/campaign_events/campaign_lists
+// (20260614230000 / 20260210000000), but none were previously listed either.
 const EXISTING_TABLES = [
+  "activities",
+  "brevo_webhook_events",
+  "campaign_events",
+  "campaign_lists",
   "campaign_recipients",
   "campaigns",
+  "companies",
   "contact_channels",
   "contact_group_members",
   "contact_groups",
@@ -20,9 +30,13 @@ const EXISTING_TABLES = [
   "contact_sync_log",
   "contacts",
   "conversation_turns",
+  "deal_stages",
+  "deals",
   "field_mappings",
+  "notes",
   "processed_external_events",
   "sync_state",
+  "tasks",
 ];
 
 const NONEXISTENT_PROPOSALS = [
