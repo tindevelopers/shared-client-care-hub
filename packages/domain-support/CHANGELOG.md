@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**FROZEN — do not publish (`"private": true`).** The published line is
+`@tindevelopers/domain-support` 4.0.0 from `shell-base-admin`, which Konnect
+consumes. That source moves into this hub as the baseline once
+shell-base-admin's current mission closes, and publishes as 5.0.0. Until
+then this package is not current: `createSupportTicketStore().update` still
+writes `escalated_to_platform_admin_at`, a column the owner-scoped schema
+drops.
+
 **BREAKING (next release must be a major, 3.0.0 proposed — owner confirms).**
 This package now owns the support data layer instead of depending on
 `@tindevelopers/core-kernel/support`; the following are breaking changes to

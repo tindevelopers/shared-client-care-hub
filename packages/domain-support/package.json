@@ -1,5 +1,6 @@
 {
   "name": "@tindevelopers/domain-support",
+  "private": true,
   "version": "2.0.1",
   "license": "MIT",
   "description": "Portable support domain: ticket policy, handoff routing, graduation, and notification decisions over injected stores",
