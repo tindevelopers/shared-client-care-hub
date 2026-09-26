@@ -17,15 +17,55 @@
       "import": "./dist/access.js",
       "default": "./dist/access.js"
     },
+    "./attachments": {
+      "types": "./dist/attachments.d.ts",
+      "import": "./dist/attachments.js",
+      "default": "./dist/attachments.js"
+    },
+    "./categories": {
+      "types": "./dist/categories.d.ts",
+      "import": "./dist/categories.js",
+      "default": "./dist/categories.js"
+    },
     "./clocks": {
       "types": "./dist/clocks.d.ts",
       "import": "./dist/clocks.js",
       "default": "./dist/clocks.js"
     },
+    "./conversation-support": {
+      "types": "./dist/conversation-support.d.ts",
+      "import": "./dist/conversation-support.js",
+      "default": "./dist/conversation-support.js"
+    },
     "./escalation": {
       "types": "./dist/escalation.d.ts",
       "import": "./dist/escalation.js",
       "default": "./dist/escalation.js"
+    },
+    "./escalation-workflow": {
+      "types": "./dist/escalation-workflow.d.ts",
+      "import": "./dist/escalation-workflow.js",
+      "default": "./dist/escalation-workflow.js"
+    },
+    "./graduation": {
+      "types": "./dist/graduation.d.ts",
+      "import": "./dist/graduation.js",
+      "default": "./dist/graduation.js"
+    },
+    "./graduation-server": {
+      "types": "./dist/graduation-server.d.ts",
+      "import": "./dist/graduation-server.js",
+      "default": "./dist/graduation-server.js"
+    },
+    "./handoff": {
+      "types": "./dist/handoff.d.ts",
+      "import": "./dist/handoff.js",
+      "default": "./dist/handoff.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications.d.ts",
+      "import": "./dist/notifications.js",
+      "default": "./dist/notifications.js"
     },
     "./propagation": {
       "types": "./dist/propagation.d.ts",
@@ -36,6 +76,31 @@
       "types": "./dist/status.d.ts",
       "import": "./dist/status.js",
       "default": "./dist/status.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "import": "./dist/store.js",
+      "default": "./dist/store.js"
+    },
+    "./tenant-helper": {
+      "types": "./dist/tenant-helper.d.ts",
+      "import": "./dist/tenant-helper.js",
+      "default": "./dist/tenant-helper.js"
+    },
+    "./threads": {
+      "types": "./dist/threads.d.ts",
+      "import": "./dist/threads.js",
+      "default": "./dist/threads.js"
+    },
+    "./ticket-policy": {
+      "types": "./dist/ticket-policy.d.ts",
+      "import": "./dist/ticket-policy.js",
+      "default": "./dist/ticket-policy.js"
+    },
+    "./tickets": {
+      "types": "./dist/tickets.d.ts",
+      "import": "./dist/tickets.js",
+      "default": "./dist/tickets.js"
     },
     "./types": {
       "types": "./dist/types.d.ts",

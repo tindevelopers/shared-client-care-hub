@@ -22,14 +22,20 @@ This release also moves the package's source from `shell-base-admin`
 (source commit `6aff243`, published as `@tindevelopers/domain-support`
 4.0.0) into this hub. The source is otherwise unchanged — same public API,
 same peer dependencies — only the tenant-helper change above is new.
-**The `exports` map's `"./*"` wildcard subpath is replaced by explicit
-entries** for the six subpaths Konnect actually imports (`./access`,
-`./clocks`, `./escalation`, `./propagation`, `./status`, `./types`), each
-resolving to the same `dist/<name>.js` this hub's build already produces —
-`scripts/validate-packages.mjs` (this hub's release gate) rejects any
-wildcard subpath outright, so the published shape could not be copied
-verbatim; every subpath a consumer actually uses still resolves to the
-identical file. The `shell-base-admin` copy is retired per that repo's
+**The `exports` map's `"./*"` wildcard is replaced by one explicit entry
+per module** (all 19 modules plus `.`). Every subpath the wildcard resolved
+still resolves to the same `dist/<name>.js`. This hub's
+`scripts/validate-packages.mjs` rejects wildcard subpaths, so the published
+shape could not be copied verbatim. A new top-level module now needs its
+own `exports` entry.
+
+The build target moves from ES2017 (shell-base-admin) to ES2022 (this hub's
+`tsconfig.base.json`, shared by every hub package). Emitted `.d.ts` files
+are byte-identical to 4.0.0 apart from `tenant-helper.d.ts`. The `.js`
+files differ only in syntax lowering: `??` is emitted natively, and class
+fields are declared.
+
+The `shell-base-admin` copy is retired per that repo's
 `PUBLISH.md` §8 only once this hub publishes its first release of this
 package.
 
