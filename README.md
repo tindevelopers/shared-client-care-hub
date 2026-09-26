@@ -61,6 +61,9 @@ tests/
 6. Published versions are immutable — bump, never re-publish.
 7. `npm deprecate` does not work on GitHub Packages (HTTP 400).
 
+See `PUBLISH.md` for the full release runbook — never bypass
+`scripts/check-release-target.mjs`.
+
 ## Reference
 
 - Design: `konnect-caas-base/docs/superpowers/specs/2026-09-12-src-core-promotion-design.md`
