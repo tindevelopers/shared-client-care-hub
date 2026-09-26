@@ -37,3 +37,20 @@ retires the partner ticket queue it replaces.
   `@tindevelopers/domain-support`'s `createCounterpartyTicketStore` (the
   store built on these two tables) is removed in the same release — see that
   package's changelog.
+- **`support_tickets.created_by` is now immutable** and the owner-member
+  INSERT policy requires it to be the caller or a fellow member of the same
+  owner, closing a gap where any owner member could hand ticket read/reply
+  access to an arbitrary outside user. No column type/nullability/CHECK
+  change — Zod schemas are unaffected. Ground truth:
+  `20260925090000_pin_support_ticket_created_by.sql`.
+- **Every support table's RLS policies (and the shared support-storage
+  policies) now apply to `authenticated` only**, and anon's `EXECUTE` on the
+  support helper/RPC functions is revoked — found by the Supabase security
+  advisor; no data had leaked (helpers answered `false`/`NULL` for anon), this
+  closes the surface. No column change. Ground truth:
+  `20260926120000_support_anon_lockdown.sql`.
+
+Konnect's hosted database applied these last two migrations under renumbered
+migration-history versions (`20260926000001`–`20260926000010`) during a
+history cleanup; the file names above (this package's `migrations/`) are the
+ADR-0002 source of truth, not the hosted `schema_migrations` history table.

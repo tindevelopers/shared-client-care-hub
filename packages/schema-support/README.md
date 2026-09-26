@@ -7,15 +7,15 @@ for the **nine existing support-ticketing tables** — nothing speculative.
 
 | Table | Columns | Source migrations |
 |---|---|---|
-| `support_categories` | 9 | 20251221000000 + 20260924100000 |
-| `support_tickets` | 19 effective | 20251221000000 + 20260223000000 + 20260924100000 + 20260924110000 |
-| `support_ticket_threads` | 10 | 20251221000000 + 20260924100000 + 20260924110000 |
-| `support_ticket_attachments` | 12 | 20251221000000 + 20260924100000 + 20260925130000 |
-| `support_ticket_history` | 10 | 20251221000000 + 20260924100000 |
-| `support_groups` | 8 | 20260924100000 + 20260925130000 |
-| `support_ticket_links` | 12 | 20260924100000 + 20260924110000 |
-| `support_access_grants` | 19 | 20260924120000 |
-| `support_access_events` | 6 | 20260924120000 |
+| `support_categories` | 9 | 20251221000000 + 20260924100000 + 20260925090000 + 20260926120000 |
+| `support_tickets` | 19 effective | 20251221000000 + 20260223000000 + 20260924100000 + 20260924110000 + 20260925090000 + 20260926120000 |
+| `support_ticket_threads` | 10 | 20251221000000 + 20260924100000 + 20260924110000 + 20260925090000 + 20260926120000 |
+| `support_ticket_attachments` | 12 | 20251221000000 + 20260924100000 + 20260925090000 + 20260925130000 + 20260926120000 |
+| `support_ticket_history` | 10 | 20251221000000 + 20260924100000 + 20260925090000 + 20260926120000 |
+| `support_groups` | 8 | 20260924100000 + 20260925090000 + 20260925130000 + 20260926120000 |
+| `support_ticket_links` | 12 | 20260924100000 + 20260924110000 + 20260926120000 |
+| `support_access_grants` | 19 | 20260924120000 + 20260926120000 |
+| `support_access_events` | 6 | 20260924120000 + 20260926120000 |
 
 Per ADR-0002 (shell-base-admin `docs/ADR-0002-schema-ownership.md`): a
 package's manifest must declare every table its own migrations create.
@@ -99,7 +99,22 @@ tooling. In adoption order:
 - `20260924110000_support_escalation_gateway.sql` — the SECURITY DEFINER
   escalation gateway (no table DDL of its own).
 - `20260924120000_support_access_grants.sql` — `support_access_grants`/`support_access_events`.
+- `20260925090000_pin_support_ticket_created_by.sql` — pins `support_tickets.created_by`
+  immutable (folded into the shared owner-immutability trigger, so also
+  touches `support_categories`, `support_groups`, `support_ticket_threads`,
+  `support_ticket_attachments`, `support_ticket_history`) and tightens the
+  owner-member INSERT policy so `created_by` must be the caller or a fellow
+  owner member.
 - `20260925130000_support_agent_permission.sql` — `support.agent` permission gate.
+- `20260926120000_support_anon_lockdown.sql` — scopes every support table's
+  policies (and the shared support-storage policies) to `authenticated`, and
+  revokes anon's `EXECUTE` on the support helper/RPC functions; touches all
+  nine tables.
+
+Konnect's hosted database applied these two support migrations under
+renumbered history versions (`20260926000001`–`20260926000010`) during a
+migration-history cleanup; this package's file names above are the ADR-0002
+source of truth, not the hosted `supabase_migrations.schema_migrations` table.
 
 Database-level RLS/function coverage for the escalation chain and access
 grants lives in Konnect's own pgTAP suite, not in this package:

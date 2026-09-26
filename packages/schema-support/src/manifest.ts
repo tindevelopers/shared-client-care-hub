@@ -83,6 +83,8 @@ export const tables: Record<SupportTableName, SupportTableInfo> = {
     migrations: [
       "20251221000000_create_support_tickets_schema.sql",
       "20260924100000_support_owner_escalation.sql",
+      "20260925090000_pin_support_ticket_created_by.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_tickets: {
@@ -91,6 +93,8 @@ export const tables: Record<SupportTableName, SupportTableInfo> = {
       "20260223000000_support_tickets_error_escalation.sql",
       "20260924100000_support_owner_escalation.sql",
       "20260924110000_support_escalation_gateway.sql",
+      "20260925090000_pin_support_ticket_created_by.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_ticket_threads: {
@@ -98,38 +102,53 @@ export const tables: Record<SupportTableName, SupportTableInfo> = {
       "20251221000000_create_support_tickets_schema.sql",
       "20260924100000_support_owner_escalation.sql",
       "20260924110000_support_escalation_gateway.sql",
+      "20260925090000_pin_support_ticket_created_by.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_ticket_attachments: {
     migrations: [
       "20251221000000_create_support_tickets_schema.sql",
       "20260924100000_support_owner_escalation.sql",
+      "20260925090000_pin_support_ticket_created_by.sql",
       "20260925130000_support_agent_permission.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_ticket_history: {
     migrations: [
       "20251221000000_create_support_tickets_schema.sql",
       "20260924100000_support_owner_escalation.sql",
+      "20260925090000_pin_support_ticket_created_by.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_groups: {
     migrations: [
       "20260924100000_support_owner_escalation.sql",
+      "20260925090000_pin_support_ticket_created_by.sql",
       "20260925130000_support_agent_permission.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_ticket_links: {
     migrations: [
       "20260924100000_support_owner_escalation.sql",
       "20260924110000_support_escalation_gateway.sql",
+      "20260926120000_support_anon_lockdown.sql",
     ],
   },
   support_access_grants: {
-    migrations: ["20260924120000_support_access_grants.sql"],
+    migrations: [
+      "20260924120000_support_access_grants.sql",
+      "20260926120000_support_anon_lockdown.sql",
+    ],
   },
   support_access_events: {
-    migrations: ["20260924120000_support_access_grants.sql"],
+    migrations: [
+      "20260924120000_support_access_grants.sql",
+      "20260926120000_support_anon_lockdown.sql",
+    ],
   },
 };
 

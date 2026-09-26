@@ -24,6 +24,10 @@ const EXPECTED_SHA256: Record<string, string> = {
     "cbef7a3bb1d847422c0c789c0538b44187ce4d7c50857b335811babed1712f9c",
   "20260925130000_support_agent_permission.sql":
     "c21f0104d4277563b1d2f76b54d52f8799b5cccb0eae272dd8cbdea905c5fe5c",
+  "20260925090000_pin_support_ticket_created_by.sql":
+    "a1afa0770bb1f878b0e6c7b06b946e7cd193281853bb853c275cfd76b5577505",
+  "20260926120000_support_anon_lockdown.sql":
+    "c312c372a5736b6db3109d3f169917ed16660fa72e3a349d60ad45b7810ee7c3",
 };
 
 describe("adopted migrations (ADR-0002 byte-identical copy)", () => {
