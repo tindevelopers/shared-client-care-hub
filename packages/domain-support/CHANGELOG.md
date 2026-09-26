@@ -1,6 +1,6 @@
 # @tindevelopers/domain-support
 
-## Unreleased
+## 5.0.0
 
 **BREAKING (next version must be 5.0.0 or higher — 3.0.0 and 4.0.0 are
 already published and immutable).**

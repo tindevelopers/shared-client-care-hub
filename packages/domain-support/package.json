@@ -1,7 +1,6 @@
 {
   "name": "@tindevelopers/domain-support",
-  "private": true,
-  "version": "4.0.0",
+  "version": "5.0.0",
   "license": "MIT",
   "description": "Portable support domain: ticket policy, handoff routing, graduation, and notification decisions over injected stores",
   "main": "./dist/index.js",
@@ -112,6 +111,9 @@
     "dist",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "restricted"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "type-check": "tsc --noEmit -p tsconfig.test.json",
