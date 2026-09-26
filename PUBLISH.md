@@ -109,6 +109,12 @@ then, a publish must be done manually: run the sentinel locally
 
 ## 2. Build and publish
 
+`select-publishable-packages.mjs` picks every non-private package whose
+version is not on the registry, and the sentinel only gates pinned ones. So a
+package whose first release the owner has not authorized stays
+`"private": true` (today: `schema-support`, `domain-pipeline`). Its release
+PR removes the flag and adds the pin together.
+
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
