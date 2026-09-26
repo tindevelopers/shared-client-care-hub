@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  # Real, YAML-expressible CI gate. Both trigger paths converge here before
+  # any package is built or published:
+  #
+  #  - workflow_run (CI finishing on `main`): gated directly on the
+  #    workflow_run event's own `conclusion` — no API call needed, and no
+  #    manual action can bypass it, since this path only fires from CI
+  #    itself completing.
+  #  - release: created (a maintainer manually drafts/publishes a GitHub
+  #    Release, which can target ANY existing commit, not necessarily one
+  #    `main` has already reached): this path gets no workflow_run
+  #    conclusion for free, so it queries the GitHub API for the most
+  #    recent completed CI run against the release's target commit and
+  #    fails closed if none is found or it did not succeed.
+  gate-ci-status:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Resolve the commit this release targets
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: "workflow_run path: trust the event's own conclusion"
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "::error::CI run ${{ github.event.workflow_run.id }} did not succeed for ${{ github.event.workflow_run.head_sha }} (conclusion: ${{ github.event.workflow_run.conclusion }}) — refusing to publish."
+            exit 1
+          fi
+      - name: "release path: require a green CI run for this commit via the API"
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ steps.resolve.outputs.sha }}"
+          conclusion=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${sha}&status=completed&per_page=1" --jq '.workflow_runs[0].conclusion // "none"')
+          echo "Most recent completed CI conclusion for ${sha}: ${conclusion}"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::No successful CI run found for commit ${sha} (latest completed conclusion: ${conclusion}) — a manually created release cannot bypass the CI gate. Refusing to publish."
+            exit 1
+          fi
+
+  publish:
+    needs: gate-ci-status
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate-ci-status.outputs.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          registry-url: 'https://npm.pkg.github.com'
+      - run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      # Shared quality chain — identical to ci.yml's quality job.
+      - run: pnpm quality
+      # Dynamic changed-package selection: a package is selected only when
+      # its workspace version is not already on the registry, ordered by the
+      # workspace dependency graph. With nothing changed the selection is
+      # empty and this release publishes nothing (idempotent no-op).
+      - name: Select packages to publish
+        run: |
+          node scripts/select-publishable-packages.mjs > selected-packages.json
+          echo "Selected $(jq 'length' selected-packages.json) package(s):"
+          jq -r 'if length == 0 then "  (none — nothing to publish)" else .[] | "  \(.name)@\(.version) (\(.directory))" end' selected-packages.json
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      - name: Pack selected packages
+        run: |
+          : > checksums.txt
+          for directory in $(jq -r '.[].directory' selected-packages.json); do
+            (cd "$directory" && npm pack && sha256sum ./*.tgz >> ../../checksums.txt)
+          done
+      # checksums.txt is always created by the pack step, so this step always
+      # has a real workflow-produced subject; with an empty selection the
+      # tarball glob simply matches nothing. Gated on visibility: the
+      # attestations API is unavailable for private user-owned repositories.
+      - name: Generate build provenance
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            packages/*/*.tgz
+            checksums.txt
+      # Release-target sentinel: runs immediately before every publish and is
+      # strictly read-only. Fails closed if any pinned target is taken,
+      # mis-stepped from the workspace version, overtaken by latest/next, or
+      # if the registry diverges from the committed release-targets.json
+      # snapshot in any unexplained way. ON FAILURE: the publish stops here —
+      # never pick a different version, bump, move a dist-tag, or edit
+      # release-targets.json to proceed.
+      - name: Release-target sentinel (fails closed before any publish)
+        run: node scripts/check-release-target.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      - name: Publish selected packages (dependency order, next tag only)
+        run: |
+          for directory in $(jq -r '.[].directory' selected-packages.json); do
+            (cd "$directory" && npm publish --tag next --access restricted)
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            packages/*/*.tgz
+            checksums.txt

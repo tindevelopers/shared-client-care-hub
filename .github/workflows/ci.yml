@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          registry-url: 'https://npm.pkg.github.com'
+      - run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      - run: pnpm quality
+      - run: node scripts/scan-secrets.mjs
+      # Release-target sentinel (fails closed before any publish): strictly
+      # read-only (npm view), run here too so a pin problem surfaces on
+      # every PR/push, not only inside release.yml immediately before a
+      # publish. ON FAILURE: stop and return to the orchestrator — never
+      # pick a different version, move a dist-tag, or edit
+      # release-targets.json to make this check pass.
+      - name: Release-target sentinel
+        run: node scripts/check-release-target.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
