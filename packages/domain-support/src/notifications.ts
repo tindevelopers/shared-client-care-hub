@@ -5,20 +5,24 @@
  * and renders the escaped subject/html/text. Transport is injected
  * (`SupportNotificationSender`); the host implements it with the existing
  * `@tindevelopers/core-kernel/email` service and resolves recipient roles
- * (customer / assignee / platform_admins) to concrete addresses.
+ * (customer / assignee / owner_queue) to concrete addresses.
  *
- * Notification types carried over from the server-action era — none are
- * removed: ticket_created, ticket_updated, ticket_escalated, ticket_reply.
+ * `owner_queue` is the agents of the ticket's owner (its group, or the
+ * whole queue). Escalation notifications only ever go to agents: a
+ * requester is told about progress by its own owner, never by an upstream
+ * organization.
  */
-import type { SupportTicket, SupportTicketThread } from "./types.js";
+import { ownerOf, type SupportOwner, type SupportTicket, type SupportTicketThread } from "./types";
 
 /** Recipient role — the host resolves it to concrete addresses. */
-export type SupportNotificationRecipient = "customer" | "assignee" | "platform_admins";
+export type SupportNotificationRecipient = "customer" | "assignee" | "owner_queue";
 
 export type SupportNotificationType =
   | "ticket_created"
   | "ticket_updated"
   | "ticket_escalated"
+  | "ticket_returned"
+  | "upstream_resolved"
   | "ticket_reply";
 
 /** A fully rendered notification; the sender only transports it. */
@@ -26,7 +30,7 @@ export interface SupportNotification {
   type: SupportNotificationType;
   recipient: SupportNotificationRecipient;
   ticketId: string;
-  tenantId: string;
+  owner: SupportOwner;
   subject: string;
   html: string;
   text: string;
@@ -68,7 +72,7 @@ function notification(
     type,
     recipient,
     ticketId: ticket.id,
-    tenantId: ticket.tenant_id,
+    owner: ownerOf(ticket),
     ...content,
   };
 }
@@ -168,24 +172,71 @@ export function buildTicketUpdatedNotifications(
   ];
 }
 
-/** Ticket escalated to platform administrators → platform_admins. */
-export function buildTicketEscalatedNotifications(ticket: SupportTicket): SupportNotification[] {
-  const supportCode = ticket.support_code
-    ? `<p><strong>Support code:</strong> ${escapeHtml(ticket.support_code)}</p>`
+/** An escalation arrived in this owner's queue → owner_queue of the upstream ticket. */
+export function buildTicketEscalatedNotifications(
+  upstream: SupportTicket,
+  fromOwnerLabel: string,
+): SupportNotification[] {
+  const supportCode = upstream.support_code
+    ? `<p><strong>Support code:</strong> ${escapeHtml(upstream.support_code)}</p>`
     : "";
   return [
-    notification("ticket_escalated", "platform_admins", ticket, {
-      subject: `Ticket escalated to platform admin: ${ticket.ticket_number}`,
+    notification("ticket_escalated", "owner_queue", upstream, {
+      subject: `Ticket escalated to your queue: ${upstream.ticket_number}`,
       html: `
         <h2>Support ticket escalated</h2>
-        <p>A support ticket has been escalated to platform admin.</p>
-        <p><strong>Ticket:</strong> ${escapeHtml(ticket.ticket_number)}</p>
-        <p><strong>Subject:</strong> ${escapeHtml(ticket.subject)}</p>
-        <p><strong>Tenant ID:</strong> ${escapeHtml(ticket.tenant_id)}</p>
+        <p>${escapeHtml(fromOwnerLabel)} escalated a ticket to your queue.</p>
+        <p><strong>Ticket:</strong> ${escapeHtml(upstream.ticket_number)}</p>
+        <p><strong>Subject:</strong> ${escapeHtml(upstream.subject)}</p>
+        <p><strong>Priority:</strong> ${escapeHtml(upstream.priority)}</p>
         ${supportCode}
         <p>Please review the ticket in the support dashboard.</p>
       `,
-      text: `Ticket ${ticket.ticket_number} (${ticket.subject}) has been escalated. Tenant: ${ticket.tenant_id}.`,
+      text: `${fromOwnerLabel} escalated ticket ${upstream.ticket_number} (${upstream.subject}) to your queue. Priority: ${upstream.priority}.`,
+    }),
+  ];
+}
+
+function downstreamRecipient(ticket: SupportTicket): SupportNotificationRecipient {
+  return ticket.assigned_to ? "assignee" : "owner_queue";
+}
+
+/** Upstream sent an escalation back → the downstream ticket's assignee or queue. */
+export function buildTicketReturnedNotifications(
+  downstream: SupportTicket,
+  upstreamTicketNumber: string,
+  reason: string,
+): SupportNotification[] {
+  return [
+    notification("ticket_returned", downstreamRecipient(downstream), downstream, {
+      subject: `Escalation sent back: ${downstream.ticket_number}`,
+      html: `
+        <h2>Escalation sent back</h2>
+        <p>Upstream ticket <strong>${escapeHtml(upstreamTicketNumber)}</strong> was sent back to ticket <strong>${escapeHtml(downstream.ticket_number)}</strong>.</p>
+        <p><strong>Subject:</strong> ${escapeHtml(downstream.subject)}</p>
+        <p><strong>Reason:</strong><br>${escapeMultiline(reason)}</p>
+      `,
+      text: `Upstream ticket ${upstreamTicketNumber} was sent back to ticket ${downstream.ticket_number} (${downstream.subject}). Reason: ${reason}`,
+    }),
+  ];
+}
+
+/** Upstream resolved an escalation → the downstream ticket's assignee or queue. */
+export function buildUpstreamResolvedNotifications(
+  downstream: SupportTicket,
+  upstreamTicketNumber: string,
+  resolution: string,
+): SupportNotification[] {
+  return [
+    notification("upstream_resolved", downstreamRecipient(downstream), downstream, {
+      subject: `Escalation resolved: ${downstream.ticket_number}`,
+      html: `
+        <h2>Escalation resolved</h2>
+        <p>Upstream ticket <strong>${escapeHtml(upstreamTicketNumber)}</strong> was resolved. Please confirm with the requester of ticket <strong>${escapeHtml(downstream.ticket_number)}</strong>.</p>
+        <p><strong>Subject:</strong> ${escapeHtml(downstream.subject)}</p>
+        <p><strong>Resolution:</strong><br>${escapeMultiline(resolution)}</p>
+      `,
+      text: `Upstream ticket ${upstreamTicketNumber} was resolved. Confirm with the requester of ticket ${downstream.ticket_number} (${downstream.subject}). Resolution: ${resolution}`,
     }),
   ];
 }

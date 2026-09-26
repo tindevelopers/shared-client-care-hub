@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { supportOwnerScopeSchema } from "./tickets.js";
 
 /**
  * Zod schema for the `support_categories` table.
@@ -7,13 +8,17 @@ import { z } from "zod";
  * supabase/migrations/20251221000000_create_support_tickets_schema.sql
  * (lines 9-18), composed with the TypeScript types at
  * shell-base-admin packages/core-kernel/support/types.ts.
+ *
+ * 20260924100000_support_owner_escalation.sql: `tenant_id` DROP NOT NULL,
+ * `+ partner_id`, `+ owner_scope` ('tenant' | 'partner' | 'platform',
+ * default 'tenant') — same owner columns as `support_tickets`.
  */
 
 const timestamptz = z.string();
 const uuid = z.string().uuid();
 
 /**
- * `support_categories` row — 7 columns.
+ * `support_categories` row — 9 columns.
  *
  * Drift note: the DDL declares `is_active BOOLEAN DEFAULT TRUE` with no
  * `NOT NULL` (unlike every other boolean/timestamp column in this migration,
@@ -24,7 +29,9 @@ const uuid = z.string().uuid();
 export const supportCategoryRowSchema = z
   .object({
     id: uuid,
-    tenant_id: uuid,
+    tenant_id: uuid.nullable(),
+    partner_id: uuid.nullable(),
+    owner_scope: supportOwnerScopeSchema,
     name: z.string(),
     description: z.string().nullable(),
     is_active: z.boolean().nullable(),
@@ -37,7 +44,6 @@ export const supportCategoryInsertSchema = supportCategoryRowSchema
   .omit({ id: true, created_at: true, updated_at: true })
   .partial()
   .extend({
-    tenant_id: uuid,
     name: z.string(),
   })
   .strict();

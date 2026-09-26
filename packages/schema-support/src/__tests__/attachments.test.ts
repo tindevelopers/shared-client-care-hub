@@ -11,12 +11,14 @@ const TICKET = "9a1b2c3d-0000-4000-8000-000000000001";
 const THREAD = "9a1b2c3d-0000-4000-8000-000000000002";
 const USER = "9a1b2c3d-0000-4000-8000-000000000011";
 
-/** Ground-truth fixture: support_ticket_attachments DDL (20251221000000). */
+/** Ground-truth fixture: support_ticket_attachments composite DDL (2 migrations). */
 const attachmentFixture = {
   id: "9a1b2c3d-0000-4000-8000-000000000003",
   ticket_id: TICKET,
   thread_id: THREAD,
   tenant_id: TENANT,
+  partner_id: null,
+  owner_scope: "tenant",
   file_name: "screenshot.png",
   file_path: "support-tickets/9a1b2c3d.../screenshot.png",
   file_size: 102400,
@@ -26,13 +28,15 @@ const attachmentFixture = {
 };
 
 describe("support_ticket_attachments", () => {
-  it("row round-trip (9 columns, no updated_at)", () => {
+  it("row round-trip (12 columns, no updated_at)", () => {
     expect(Object.keys(supportTicketAttachmentRowSchema.shape).sort()).toEqual(
       [
         "id",
         "ticket_id",
         "thread_id",
         "tenant_id",
+        "partner_id",
+        "owner_scope",
         "file_name",
         "file_path",
         "file_size",
@@ -52,16 +56,32 @@ describe("support_ticket_attachments", () => {
     ).toBe(false);
   });
 
+  it("owner_scope rejects a value outside tenant/partner/platform", () => {
+    expect(
+      supportTicketAttachmentRowSchema.safeParse({ ...attachmentFixture, owner_scope: "bogus" })
+        .success,
+    ).toBe(false);
+  });
+
   it("thread_id is nullable (attachment can be on the ticket directly)", () => {
     expect(
       supportTicketAttachmentRowSchema.safeParse({ ...attachmentFixture, thread_id: null }).success,
     ).toBe(true);
   });
 
-  it("insert requires every NOT NULL column except id/created_at", () => {
+  it("tenant_id is nullable (20260924100000 — overwritten by the owner-inherit trigger anyway)", () => {
+    expect(
+      supportTicketAttachmentRowSchema.safeParse({
+        ...attachmentFixture,
+        tenant_id: null,
+        owner_scope: "platform",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("insert requires every NOT NULL column except id/created_at/tenant_id/partner_id/owner_scope", () => {
     const required = {
       ticket_id: TICKET,
-      tenant_id: TENANT,
       file_name: "screenshot.png",
       file_path: "support-tickets/x/screenshot.png",
       file_size: 100,

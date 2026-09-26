@@ -19,7 +19,7 @@ import type {
   GraduationStore,
   ResolvedSupportProvider,
   SupportGraduationDeps,
-} from "./graduation.js";
+} from "./graduation";
 
 export interface BindingResolverDeps {
   bindingStore: BindingStore;

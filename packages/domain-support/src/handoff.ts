@@ -6,7 +6,7 @@
  * that is not an Operations target MUST declare an explicit fallback — a
  * failed handoff with nowhere to go is rejected, never silently dropped.
  */
-import type { SupportOutcome } from "./ticket-policy.js";
+import type { SupportOutcome } from "./ticket-policy";
 
 export interface SupportRoute {
   id: string;
