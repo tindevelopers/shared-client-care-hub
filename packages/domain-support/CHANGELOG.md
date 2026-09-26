@@ -2,80 +2,9 @@
 
 ## Unreleased
 
-**FROZEN — do not publish (`"private": true`).** The published line is
-`@tindevelopers/domain-support` 4.0.0 from `shell-base-admin`, which Konnect
-consumes. That source moves into this hub as the baseline once
-shell-base-admin's current mission closes, and publishes as 5.0.0. Until
-then this package is not current: `createSupportTicketStore().update` still
-writes `escalated_to_platform_admin_at`, a column the owner-scoped schema
-drops.
+**BREAKING (next version must be 5.0.0 or higher — 3.0.0 and 4.0.0 are
+already published and immutable).**
 
-**BREAKING (next release must be a major, 3.0.0 proposed — owner confirms).**
-This package now owns the support data layer instead of depending on
-`@tindevelopers/core-kernel/support`; the following are breaking changes to
-the public API a consumer must account for on upgrade:
-
-- **`@tindevelopers/schema-support` adopts Konnect's owner-scoped support
-  escalation chain** (ADR-0002 schema ownership; ground truth
-  `20260924100000_support_owner_escalation.sql` and friends — see that
-  package's changelog for the full column-level list). The rows this
-  package's types derive from change shape as a result:
-  - `SupportTicket`/`SupportCategory`/`SupportTicketThread`/
-    `SupportTicketAttachment`'s `tenant_id` **widens from required to
-    nullable** (`string | null`) — a partner- or platform-owned row has no
-    tenant. `SupportNotification.tenantId` follows the same widening.
-  - **`SupportTicketRow.escalated_to_platform_admin_at` is removed** (the
-    column is dropped from `support_tickets`; platform escalation now goes
-    through `owner_scope = 'platform'` and Konnect's escalation gateway
-    functions, not this column). `SupportTicket` keeps the field as a
-    domain-only, optional compatibility property so the existing
-    escalation-notification path (`tickets.ts`/`notifications.ts`) keeps
-    working unchanged; redesigning that path onto the owner-scope gateway is
-    a later step, out of scope here.
-  - **`createCounterpartyTicketStore` is removed** (see Removed, below) —
-    the two tables it was built on are retired upstream.
-  - The stores in this package (`createSupportTicketStore` and friends) are
-    **not** redesigned to be owner-scope aware in this change; they still
-    read/write `support_tickets` et al. exactly as before, scoped only by
-    `tenantId`. Owner-scope-aware stores are a later step.
-- **`SupportStore.saveTicket(ticket)` is removed**, replaced by
-  `createTicket(input: CreateSupportTicketInput)` and
-  `updateTicket(id, input: UpdateTicketInput)`. The old contract required
-  the HOST to synthesize `id`/`ticket_number`/timestamps before every call;
-  the new one lets the DB own them (the `set_support_ticket_number` trigger
-  and column defaults) and takes `created_by` as an explicit argument
-  instead. `SupportService.createTicket` has the same new input shape.
-- **Domain types now come from `@tindevelopers/schema-support` row types**,
-  not `@tindevelopers/core-kernel/support/types`: `SupportCategory`,
-  `SupportTicket`, `SupportTicketThread`, `SupportTicketAttachment`. Two
-  fields widen from non-null to nullable to match the real DDL (a
-  documented pre-existing drift in schema-support): `SupportCategory.is_active`
-  and `SupportTicketThread.is_internal` are now `boolean | null`.
-- **New public API**: `createSupportTicketStore`, `createSupportThreadStore`,
-  `createSupportAttachmentStore`, `createSupportCategoryStore`, and
-  `createSupportStore` (all `(client: SupabaseClient, tenantId: string) => …`,
-  the same injection-only shape as `domain-contacts`' `createContactsStore`).
-- **`@tindevelopers/core-kernel` is no longer a dependency of this package**
-  (peer or otherwise) — zero imports of `@tindevelopers/core-kernel/support`
-  remain. `@tindevelopers/adapter-kit` moves from a peer dependency to a
-  real one (it was always a runtime import in `graduation.ts`, not type-only).
-  `@supabase/supabase-js` and `@tindevelopers/schema-support` (`workspace:^`)
-  are added as real dependencies.
-- **Attachment paths must sit inside the tenant's storage folder**
-  (`<tenantId>/…`, optionally prefixed `support-tickets/`, no `..`
-  segments). `createSupportAttachmentStore().create` rejects any other
-  `file_path` before touching the database. (`remove`/`getDownloadUrl`'s
-  handling of an existing out-of-folder path is covered below, under
-  Fixed — they degrade gracefully rather than throwing.) The core-kernel
-  version accepted any host-supplied path.
-- **`SupportTicket`'s `support_code`, `support_ref`, and
-  `escalated_to_platform_admin_at` move from optional to required-and-
-  nullable** (`string | null`, always present), matching the
-  `@tindevelopers/schema-support` row exactly now that `SupportTicket`
-  extends it directly. `external_refs`/`sync_state` also newly appear on
-  the type, as optional (`schema-support`'s `tickets.ts` doc comment
-  explains why: the migration that creates those two columns is not
-  shipped by that package).
 - **`SupportTenantContext` drops `isSystemOperator`/`firstAvailableTenantId`,
   and `resolveSupportTenantId` no longer falls back to an arbitrary tenant
   for system operators.** The old fallback let a platform-operator caller
@@ -86,57 +15,66 @@ the public API a consumer must account for on upgrade:
   tenant scope like any other actor, so the domain needs no platform branch.
   The `"No tenants found"` (system-operator, no tenant) error message is
   removed entirely; the remaining `"No tenant found"` message and its prefix
-  contract are unchanged.
+  contract are unchanged. A system operator with no tenant now throws
+  instead of resolving to a fallback tenant.
 
-### Removed
+This release also moves the package's source from `shell-base-admin`
+(source commit `6aff243`, published as `@tindevelopers/domain-support`
+4.0.0) into this hub. The source is otherwise unchanged — same public API,
+same peer dependencies — only the tenant-helper change above is new.
+**The `exports` map's `"./*"` wildcard subpath is replaced by explicit
+entries** for the six subpaths Konnect actually imports (`./access`,
+`./clocks`, `./escalation`, `./propagation`, `./status`, `./types`), each
+resolving to the same `dist/<name>.js` this hub's build already produces —
+`scripts/validate-packages.mjs` (this hub's release gate) rejects any
+wildcard subpath outright, so the published shape could not be copied
+verbatim; every subpath a consumer actually uses still resolves to the
+identical file. The `shell-base-admin` copy is retired per that repo's
+`PUBLISH.md` §8 only once this hub publishes its first release of this
+package.
 
-- **`createCounterpartyTicketStore(client, partnerId)`** (`./stores`),
-  along with its types (`CounterpartyTicket`, `CounterpartyTicketReply`,
-  `CounterpartyTicketStore`, etc.) — the store for Konnect's partner-facing
-  ticket queue (`partner_support_tickets`/`partner_support_ticket_replies`).
-  This package's Unreleased log previously listed adding this store; it is
-  removed here, in the same Unreleased window, before ever shipping: those
-  two tables are now retired upstream — "no production data of substance,
-  confirmed 2026-09-24" per
-  `20260924100000_support_owner_escalation.sql`'s header — so the store built
-  on them is dropped rather than left pointing at dropped tables.
-  Partner-owned tickets now live in `support_tickets` with `owner_scope =
-  'partner'`; a store for that shape is a later step.
+## 4.0.0
 
-### Fixed
+### Major Changes
 
-Found in post-merge review of the store port above; behavior changes a
-consumer may notice:
+- 89325be: The service enforces the support-agent rule.
 
-- **Cross-tenant category/thread references.** `createSupportTicketStore().create`/
-  `.update` now verify a supplied `category_id` belongs to the bound tenant
-  before writing it, and `createSupportAttachmentStore().create` does the
-  same for `thread_id` (throwing `"Category not found"` / `"Thread not
-  found"` otherwise). A foreign key alone only proves the row exists
-  somewhere; previously a cross-tenant id was accepted and readable back
-  through `TICKET_SELECT`'s `category:support_categories(*)` join.
-- **Empty-string optional fields.** `create()` on the ticket, attachment,
-  and category stores again treats `''` as `null` for optional uuid/text
-  fields (ticket `description`/`category_id`/`assigned_to`/`support_code`/
-  `support_ref`, attachment `thread_id`, category `description`), matching
-  the core-kernel original. The initial port used `?? null`, which let an
-  empty string reach a uuid column and fail at the database.
-- **Internal-note attachments leaking.** `createSupportStore(...).listAttachments`
-  now excludes attachments on internal (`is_internal`) threads, matching
-  `listThreads`'s existing behavior. The lower-level
-  `createSupportAttachmentStore().list` is unchanged (agent-side callers
-  may still need everything).
-- **`NULL` `is_internal` hidden from thread lists.** `createSupportThreadStore().list`
-  now treats a `NULL` `is_internal` the same as `false` (not internal); it
-  previously hid such rows entirely because the column is nullable and the
-  filter used `.eq("is_internal", false)`.
-- **Legacy attachment paths.** `createSupportAttachmentStore().remove`/
-  `.getDownloadUrl` no longer throw for a stored `file_path` outside the
-  tenant's folder. `remove` still deletes the tenant-scoped row (skipping
-  only the storage delete, with a logged warning); `getDownloadUrl` returns
-  `null`. This unblocks legacy rows written before paths were confined to
-  the tenant's folder. `create` is unchanged and still rejects an
-  out-of-folder path outright.
+  Breaking change: `SupportServiceDeps` requires `actor: { id: string; isAgent: boolean }`. For a non-agent (`isAgent: false`) the service:
+
+  - hides internal threads (`listThreads`) and attachments on internal threads (`listAttachments`);
+  - rejects `appendThread` with `is_internal: true`;
+  - rejects `updateTicket`, `escalateTicket`, `resolveTicket`, `returnEscalation`, `withdrawEscalation`, `mergeTickets`, `saveCategory`, `deleteCategory` and `saveGroup` with the new `SupportForbiddenError` (carrying `operation`), before touching the store.
+
+  Requester operations (`listTickets`, `getTicket`, `createTicket`, public replies, `listCategories`, `listGroups`, `listLinks`, `getTicketClocks`) are unchanged. Also exported: `SupportActor`, `requireAgent`.
+
+  Migration: pass `actor` to `createSupportService`, with `isAgent` from the `support.agent` permission (`current_user_has_permission('support.agent')` from `@tindevelopers/schema-identity` 1.1.0); map `SupportForbiddenError` to a "not allowed" response.
+
+  Design: shell-base-admin `docs/specs/2026-09-25-support-agent-permission-design.md` §3.3.
+
+## 3.0.0
+
+### Major Changes
+
+- 2d98d8f: Owner-scoped support with a multi-level escalation chain.
+
+  Breaking changes:
+
+  - The package owns its support model (`SupportTicket`, `SupportTicketThread`, `SupportTicketAttachment`, `SupportCategory`, `TicketStatus`, `TicketPriority`, `CreateTicketInput`, `UpdateTicketInput`) instead of re-exporting `@tindevelopers/core-kernel/support`. Every row carries `owner_scope` + `tenant_id` / `partner_id`: a ticket is owned by exactly one tenant, partner or the platform.
+  - `TicketStatus` adds `waiting_on_customer` and `waiting_on_upstream`. `escalated_to_platform_admin_at` is removed; escalation is a linked upstream ticket.
+  - `SupportStore` is owner-scoped. `saveTicket(ticket, actorId)` takes the acting user, and the store adds `listGroups`, `saveGroup`, `listLinks` and `listStatusEvents`.
+  - `SupportServiceDeps` requires `ownerChain` (`SupportOwnerChain`) and `escalations` (`SupportEscalationGateway`, the only cross-owner writer). `createTicket` and `updateTicket` take `actorId`.
+  - Notifications: `SupportNotification.tenantId` is replaced by `owner`; recipient `platform_admins` is replaced by `owner_queue`; `buildTicketEscalatedNotifications(upstream, fromOwnerLabel)` targets the upstream queue.
+  - `updateTicket` enforces the status rules and refuses to resolve or close a ticket that escalations are waiting on.
+
+  Added:
+
+  - `escalateTicket`, `resolveTicket`, `returnEscalation`, `withdrawEscalation`, `mergeTickets` on the service, with pure planners `selectEscalationTarget`, `buildUpstreamTicket` (privacy-filtered copy: no requester identity, replies, notes or attachments unless chosen), `planResolution`, `planReturn`, `planWithdraw`, `planMerge`.
+  - Support groups for tiers inside an owner (`group_id`).
+  - `computeTicketClocks` / `getTicketClocks`: a customer clock that stops only when resolved or closed, and an owner clock that also pauses while waiting on the customer or upstream.
+  - `ticket_returned` and `upstream_resolved` notifications, sent only to agents.
+  - Support access grants (`access.ts`): `SupportAccessGrant`, `SupportAccessEvent`, `accessGrantState`, `validateAccessRequest` and the access limits. Staff above an owner read its tickets only through a consented, time-boxed, read-only, logged grant; break-glass is platform-only, 1 hour, and alerts the owner.
+
+  Design: `konnect-caas-base` `docs/superpowers/specs/2026-09-24-support-escalation-chain-design.md`.
 
 ## 2.0.1
 

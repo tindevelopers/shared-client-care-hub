@@ -1,7 +1,7 @@
 {
   "name": "@tindevelopers/domain-support",
   "private": true,
-  "version": "2.0.1",
+  "version": "4.0.0",
   "license": "MIT",
   "description": "Portable support domain: ticket policy, handoff routing, graduation, and notification decisions over injected stores",
   "main": "./dist/index.js",
@@ -11,6 +11,36 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./access": {
+      "types": "./dist/access.d.ts",
+      "import": "./dist/access.js",
+      "default": "./dist/access.js"
+    },
+    "./clocks": {
+      "types": "./dist/clocks.d.ts",
+      "import": "./dist/clocks.js",
+      "default": "./dist/clocks.js"
+    },
+    "./escalation": {
+      "types": "./dist/escalation.d.ts",
+      "import": "./dist/escalation.js",
+      "default": "./dist/escalation.js"
+    },
+    "./propagation": {
+      "types": "./dist/propagation.d.ts",
+      "import": "./dist/propagation.js",
+      "default": "./dist/propagation.js"
+    },
+    "./status": {
+      "types": "./dist/status.d.ts",
+      "import": "./dist/status.js",
+      "default": "./dist/status.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
     }
   },
   "files": [
@@ -22,12 +52,12 @@
     "type-check": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.89.0",
-    "@tindevelopers/adapter-kit": "^1.9.1",
-    "@tindevelopers/schema-support": "workspace:^"
+  "peerDependencies": {
+    "@tindevelopers/core-kernel": "^2.0.0",
+    "@tindevelopers/adapter-kit": "^1.0.0"
   },
   "devDependencies": {
+    "@tindevelopers/adapter-kit": "^1.9.1",
     "@types/node": "^22.10.5",
     "typescript": "^5.9.2"
   },

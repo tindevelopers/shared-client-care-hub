@@ -1,36 +1,43 @@
 # @tindevelopers/domain-support
 
-Support domain: ticket policy, handoff routing, conversation-to-ticket
-linking, graduation (first-party-first specialist-desk sync), notification
-decisions with escaped templates, and the injected data-access stores for the
-five `support_*` tables (typed from `@tindevelopers/schema-support`).
+Portable support domain: owner-scoped tickets (tenant, partner or platform),
+support groups for tiers inside an owner, a multi-level escalation chain
+(linked upstream tickets, send-back, withdrawal, merge with fan-out),
+customer and owner clocks, ticket policy, handoff routing,
+conversation-to-ticket linking, graduation (first-party-first
+specialist-desk sync), and notification decisions with escaped templates.
 
-Injection-only (R2): every store factory takes a `SupabaseClient` and a
-`tenantId` and binds every query to that tenant; the package never
-constructs a client, never imports core-kernel's `database/admin-client`,
-never reads the service-role key from the environment, and never resolves
-the acting user itself — `created_by`/`user_id`/`uploaded_by` are explicit
-arguments the host resolves and injects.
+The package is pure — no database client, no `"use server"`, no vendor SDK.
+The host app implements:
 
-## Public surface
+- `SupportStore` — storage for ONE owner, never another owner's rows
+- `SupportNotificationSender` — e.g. with `@tindevelopers/core-kernel/email`
+- `SupportOwnerChain` — an owner's parent (subtenant → tenant → partner → platform)
+- `SupportEscalationGateway` — the only cross-owner writer; authorizes the
+  actor and applies each escalation plan in one transaction
+- `syncDeskBestEffort` — e.g. with the graduation core wired through
+  `createBindingProviderResolver`
+- `actor` — `{ id, isAgent }` for the caller; `isAgent` means the caller
+  holds the `support.agent` permission (e.g. from
+  `current_user_has_permission('support.agent')`)
 
-| Export | Contents |
-|---|---|
-| `createSupportTicketStore(client, tenantId)` | `list` / `get` / `getByNumber` / `create` / `update` / `remove` / `stats` |
-| `createSupportThreadStore(client, tenantId)` | `list` / `get` / `create` / `update` / `remove` |
-| `createSupportAttachmentStore(client, tenantId)` | `list` / `get` / `create` / `remove` / `getDownloadUrl` (Supabase Storage, `support-tickets` bucket) |
-| `createSupportCategoryStore(client, tenantId)` | `list` / `get` / `create` / `update` / `remove` (soft delete: `is_active = false`) |
-| `createSupportStore(client, tenantId)` | Composes the four stores above into the `SupportStore` contract `createSupportService` depends on |
-| `createSupportService(deps)` | Ticket policy, notifications, and desk-sync orchestration over an injected `SupportStore` |
+then composes everything with `createSupportService(deps)`.
 
-`id`, `ticket_number` (DB trigger), `created_at`, and `updated_at` are always
-DB-owned — no store ever synthesizes them.
+The service enforces the support-agent rule itself. For a non-agent it
+hides internal threads and their attachments, rejects internal notes, and
+throws `SupportForbiddenError` on ticket state changes (update, escalate,
+resolve, send back, withdraw, merge) and on category and group writes.
+Requesters keep listing, reading and creating tickets and replying publicly.
 
-The higher-level pieces (`ticket-policy`, `handoff`, `conversation-support`,
-`graduation`, `notifications`) stay pure and dependency-injected as before;
-`SupportNotificationSender` and `syncDeskBestEffort` are still host-provided
-(e.g. with `@tindevelopers/core-kernel/email` and the graduation core wired
-through `createBindingProviderResolver`).
+Nothing identifying the requester, no reply, no internal note and no
+attachment crosses an owner boundary unless the escalating agent chooses it.
+
+Staff above an owner (its partner, or the platform) read that owner's
+tickets only through a support access grant (`access.ts`): consented by the
+owner's admins, time-boxed (1 to 168 hours), read-only, and logged on every
+read. Break-glass is platform-only, lasts 1 hour and alerts the owner. The
+host's database enforces the grant; the package supplies the types, state
+and limits.
 
 ## Tenant resolution is fail-closed
 

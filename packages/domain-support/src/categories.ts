@@ -1,10 +1,10 @@
 /**
  * Category operations over the injected store (pure).
  */
-import type { SupportCategory } from "./types.js";
-import type { SaveCategoryInput, SupportStore } from "./store.js";
+import type { SupportCategory } from "./types";
+import type { SaveCategoryInput, SupportStore } from "./store";
 
-/** List the categories of the tenant the store is bound to. */
+/** List the categories of the owner the store is bound to. */
 export async function listCategories(store: SupportStore): Promise<SupportCategory[]> {
   return store.listCategories();
 }
